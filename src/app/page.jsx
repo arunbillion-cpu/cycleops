@@ -50,8 +50,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // ══════════════════════════════════════
 // CONFIG
 // ══════════════════════════════════════
-const SUPABASE_URL  = process.env.https://swrtpnwkuqfhitzhgmwx.supabase.co  || "";
-const SUPABASE_KEY  = process.env.sb_publishable_CdxgFkflBU0c98LrHqifHg_6dVRbS1m || "";
+const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL  || "https://swrtpnwkuqfhitzhgmwx.supabase.co";
+const SUPABASE_KEY  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_CdxgFkflBU0c98LrHqifHg_6dVRbS1m";
 const ADMIN_PIN     = "arun"; // Change before event
 const EVENT_DATE    = "30 May 2026";
 
