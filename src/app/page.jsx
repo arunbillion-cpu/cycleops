@@ -51,7 +51,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // CONFIG
 // ══════════════════════════════════════
 const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL  || "https://swrtpnwkuqfhitzhgmwx.supabase.co";
-const SUPABASE_KEY  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_CdxgFkflBU0c98LrHqifHg_6dVRbS1m";
+const SUPABASE_KEY  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3cnRwbndrdXFmaGl0emhnbXd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4NDM0MTcsImV4cCI6MjA5NTQxOTQxN30.B7GXbyTFXKhQyP-WkybFxnwwuFL3wTzzIN5QrIPNXII";
 const ADMIN_PIN     = "arun"; // Change before event
 const EVENT_DATE    = "30 May 2026";
 
@@ -202,10 +202,12 @@ const GAME5_QUESTIONS = [
 ];
 
 // ══════════════════════════════════════
-// SUPABASE DB HELPER
+// SUPABASE DB HELPER (raw REST — works with anon key)
 // ══════════════════════════════════════
 async function supabaseQuery(table, method, data = null, filters = null) {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return { data: null, error: "No Supabase config" };
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    return { data: null, error: "Supabase not configured (missing URL or key)" };
+  }
   let url = `${SUPABASE_URL}/rest/v1/${table}`;
   if (filters) url += `?${filters}`;
   const headers = {
@@ -214,13 +216,59 @@ async function supabaseQuery(table, method, data = null, filters = null) {
     "Authorization": `Bearer ${SUPABASE_KEY}`,
     "Prefer": method === "POST" ? "return=representation" : "",
   };
-  const res = await fetch(url, {
-    method, headers,
-    body: data ? JSON.stringify(data) : undefined
+  try {
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: data ? JSON.stringify(data) : undefined,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { data: null, error: `HTTP ${res.status}: ${text}` };
+    }
+    const json = await res.json().catch(() => null);
+    return { data: json, error: null };
+  } catch (e) {
+    return { data: null, error: e.message || "Network error" };
+  }
+}
+
+// Test connection + basic write permission
+async function testSupabaseConnection() {
+  const testId = "conn_test_" + Date.now();
+  // Try a lightweight read first
+  const read = await supabaseQuery("participants", "GET", null, "limit=1");
+  if (read.error) return { ok: false, step: "read", error: read.error };
+
+  // Try a write (we will immediately delete it)
+  const write = await supabaseQuery("participants", "POST", {
+    id: testId,
+    name: "CONNECTION_TEST",
+    age: 99,
+    phone: "0000000000",
+    emergency: "test",
+    team_id: "alpha",
+    registered_at: new Date().toISOString(),
   });
-  if (!res.ok) return { data: null, error: await res.text() };
-  const json = await res.json();
-  return { data: json, error: null };
+  if (write.error) return { ok: false, step: "write", error: write.error };
+
+  // Clean up the test row
+  await supabaseQuery("participants", "DELETE", null, `id=eq.${testId}`);
+  return { ok: true, step: "ok" };
+}
+
+// Full reset for fresh event start
+async function resetAllSupabaseData(showToast) {
+  const tables = ["game_answers", "checkins", "participants"];
+  for (const t of tables) {
+    const res = await supabaseQuery(t, "DELETE", null, "id=neq.null"); // delete all
+    if (res.error) {
+      if (showToast) showToast(`Failed to clear ${t}: ${res.error}`, "error");
+      return false;
+    }
+  }
+  if (showToast) showToast("All Supabase data cleared — fresh start ready");
+  return true;
 }
 
 // ══════════════════════════════════════
@@ -281,6 +329,7 @@ export default function CycleOps() {
   const [testMode, setTestMode] = useState(true); // TEST = local only, LIVE = Supabase
   const [showScanner, setShowScanner] = useState(false);
   const [toast, setToast] = useState(null);
+  const [supabaseStatus, setSupabaseStatus] = useState(null); // null | "testing" | {ok:true} | {ok:false, error, step}
 
   // ── Auth ──
   const [cyclist, setCyclist] = useState(null);      // logged-in cyclist
@@ -321,6 +370,18 @@ export default function CycleOps() {
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Persist testMode across refreshes (admin convenience)
+  useEffect(() => {
+    const saved = localStorage.getItem("cycleops_testMode");
+    if (saved !== null) {
+      setTestMode(saved === "true");
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("cycleops_testMode", String(testMode));
+  }, [testMode]);
 
   const showToast = useCallback((msg, type="success") => {
     setToast({msg,type});
@@ -430,7 +491,8 @@ export default function CycleOps() {
     };
     setCheckins(prev=>[...prev,checkin]);
     if (!testMode && SUPABASE_URL) {
-      supabaseQuery("checkins","POST",checkin);
+      const res = await supabaseQuery("checkins","POST",checkin);
+      if (res.error) showToast("Live write failed (checkin): " + res.error, "error");
     }
     const cp = CHECKPOINTS.find(c=>c.id===activeCP);
     showToast(`✅ Checked in at ${cp?.name}! Time recorded.`);
@@ -460,7 +522,10 @@ export default function CycleOps() {
     setParticipants(allP);
     const me = allP.find(p=>p.id===id);
     setCyclist(me);
-    if (!testMode && SUPABASE_URL) supabaseQuery("participants","POST",me);
+    if (!testMode && SUPABASE_URL) {
+      const res = await supabaseQuery("participants","POST",me);
+      if (res.error) showToast("Live write failed (register): " + res.error, "error");
+    }
     setRegForm({name:"",age:"",phone:"",emergency:"",medical:false});
     setView("dashboard");
     showToast(`Registered! Team ${TEAMS.find(t=>t.id===me.teamId)?.name} ✓`);
@@ -476,14 +541,17 @@ export default function CycleOps() {
   };
 
   // ── Game answer submission ──
-  const submitGameAnswers = (game, answers, questions, pointsEach) => {
+  const submitGameAnswers = async (game, answers, questions, pointsEach) => {
     if (!cyclist) return 0;
     let correct = 0;
     questions.forEach((q,i)=>{ if(answers[i]===q.a) correct++; });
     const score = correct*pointsEach;
     const entry = { id:genId(), cyclistId:cyclist.id, cyclistName:cyclist.name, teamId:cyclist.teamId, game, answers, score, correct, total:questions.length, submittedAt:new Date().toISOString() };
     setGameAnswers(prev=>[...prev.filter(a=>!(a.cyclistId===cyclist.id&&a.game===game)),entry]);
-    if (!testMode && SUPABASE_URL) supabaseQuery("game_answers","POST",entry);
+    if (!testMode && SUPABASE_URL) {
+      const res = await supabaseQuery("game_answers","POST",entry);
+      if (res.error) showToast("Live write failed (game): " + res.error, "error");
+    }
     return { score, correct };
   };
 
@@ -509,19 +577,37 @@ export default function CycleOps() {
         </div>
       </nav>
 
+      {/* Global Test Mode banner — very hard to miss */}
+      {testMode && view !== "admin" && (
+        <div style={{
+          background:"linear-gradient(90deg,#3a0f0f,#2a0a0a)",
+          borderBottom:"1px solid #ff555533",
+          padding:"8px 16px",
+          fontSize:12,
+          fontFamily:"monospace",
+          color:"#ff8888",
+          display:"flex",
+          alignItems:"center",
+          gap:10
+        }}>
+          <span style={{background:"#ff000033",padding:"2px 6px",borderRadius:3}}>TEST MODE</span>
+          <span>Data is local only. Go to Admin → Settings to switch to LIVE and write to Supabase.</span>
+        </div>
+      )}
+
       <div style={{paddingBottom:50}}>
         {view==="home"       && <HomeView setView={setView} lb={lb} cyclist={cyclist} setShowScanner={setShowScanner} />}
         {view==="register"   && <RegisterView regForm={regForm} setRegForm={setRegForm} onSubmit={handleRegister} setView={setView} />}
         {view==="login"      && <LoginView onLogin={handleLogin} setView={setView} />}
         {view==="dashboard"  && <DashboardView cyclist={cyclist} setCyclist={setCyclist} lb={lb} checkins={checkins} gameAnswers={gameAnswers} setView={setView} setShowScanner={setShowScanner} activeCP={activeCP} setActiveCP={setActiveCP} showToast={showToast} />}
         {view==="cpCheckin"  && <CPCheckinView activeCP={activeCP} cyclist={cyclist} checkins={checkins} onCheckin={handleCPCheckin} setView={setView} />}
-        {view==="game1"      && <Game1View cyclist={cyclist} gameAnswers={gameAnswers} onSubmit={(answers)=>submitGameAnswers("game1",answers,GAME1_QUESTIONS,4)} setView={setView} showToast={showToast} />}
+        {view==="game1"      && <Game1View cyclist={cyclist} gameAnswers={gameAnswers} onSubmit={async (answers)=>await submitGameAnswers("game1",answers,GAME1_QUESTIONS,4)} setView={setView} showToast={showToast} />}
         {view==="game3"      && <Game3View cyclist={cyclist} setView={setView} showToast={showToast} />}
-        {view==="game4"      && <Game4View cyclist={cyclist} gameAnswers={gameAnswers} onSubmit={(answers)=>submitGameAnswers("game4",answers,GAME4_QUESTIONS,3)} setView={setView} showToast={showToast} />}
+        {view==="game4"      && <Game4View cyclist={cyclist} gameAnswers={gameAnswers} onSubmit={async (answers)=>await submitGameAnswers("game4",answers,GAME4_QUESTIONS,3)} setView={setView} showToast={showToast} />}
         {view==="game5"      && <Game5View cyclist={cyclist} gameAnswers={gameAnswers} setGameAnswers={setGameAnswers} testMode={testMode} setView={setView} showToast={showToast} />}
         {view==="leaderboard"&& <LeaderboardView lb={lb} scoring={scoring} setView={setView} />}
         {view==="adminAuth"  && <AdminAuthView adminPin={adminPin} setAdminPin={setAdminPin} onAuth={()=>{if(adminPin===ADMIN_PIN){setAdminAuth(true);setView("admin");showToast("Admin access granted");}else showToast("Wrong PIN","error");}} setView={setView} />}
-        {view==="admin"      && adminAuth && <AdminView participants={participants} lb={lb} checkins={checkins} gameAnswers={gameAnswers} game2Status={game2Status} setGame2Status={setGame2Status} game3Timers={game3Timers} setGame3Timers={setGame3Timers} game5Marks={game5Marks} setGame5Marks={setGame5Marks} scoring={scoring} setScoring={setScoring} testMode={testMode} setTestMode={setTestMode} setView={setView} showToast={showToast} />}
+        {view==="admin"      && adminAuth && <AdminView participants={participants} lb={lb} checkins={checkins} gameAnswers={gameAnswers} game2Status={game2Status} setGame2Status={setGame2Status} game3Timers={game3Timers} setGame3Timers={setGame3Timers} game5Marks={game5Marks} setGame5Marks={setGame5Marks} scoring={scoring} setScoring={setScoring} testMode={testMode} setTestMode={setTestMode} setView={setView} showToast={showToast} supabaseStatus={supabaseStatus} setSupabaseStatus={setSupabaseStatus} />}
         {view==="qrcodes"    && adminAuth && <QRCodesView setView={setView} />}
         {view==="scoringGuide" && <ScoringGuideView scoring={scoring} setView={setView} />}
       </div>
@@ -1166,7 +1252,7 @@ function AdminAuthView({ adminPin, setAdminPin, onAuth, setView }) {
 // ══════════════════════════════════════
 // ADMIN DASHBOARD
 // ══════════════════════════════════════
-function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, game3Timers, setGame3Timers, game5Marks, setGame5Marks, scoring, setScoring, testMode, setTestMode, setView, showToast }) {
+function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, game3Timers, setGame3Timers, game5Marks, setGame5Marks, scoring, setScoring, testMode, setTestMode, setView, showToast, supabaseStatus, setSupabaseStatus }) {
   const [tab, setTab] = useState("overview");
   const fmt = (s) => s!=null?`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`:"—";
 
@@ -1412,17 +1498,73 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
         {/* SETTINGS */}
         {tab==="settings"&&(
           <div>
+            {/* MODE TOGGLE — much clearer */}
             <p style={SEC_LABEL}>EVENT MODE</p>
-            <div style={{...CARD,marginBottom:16}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{...CARD,marginBottom:16,borderColor:testMode?"#ff555533":"#00ff8833"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                 <div>
-                  <div style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:testMode?"#ff6666":"#00ff88"}}>{testMode?"TEST MODE":"LIVE MODE"}</div>
-                  <div style={{fontSize:12,color:"#555",marginTop:4}}>{testMode?"Data stored locally only":"Data synced to Supabase"}</div>
+                  <div style={{fontFamily:"monospace",fontSize:18,fontWeight:"bold",color:testMode?"#ff6666":"#00ff88"}}>
+                    {testMode ? "TEST MODE" : "LIVE MODE"}
+                  </div>
+                  <div style={{fontSize:12,color:"#555",marginTop:4}}>
+                    {testMode ? "All data is local only — nothing reaches Supabase" : "Writes are going to Supabase right now"}
+                  </div>
                 </div>
                 <button onClick={()=>setTestMode(p=>!p)}
-                  style={{background:testMode?"rgba(0,255,136,0.08)":"rgba(255,85,85,0.08)",border:`1px solid ${testMode?"#00ff88":"#ff5555"}`,color:testMode?"#00ff88":"#ff5555",borderRadius:10,padding:"10px 18px",cursor:"pointer",fontFamily:"monospace",fontSize:12,fontWeight:"bold"}}>
+                  style={{background:testMode?"rgba(0,255,136,0.08)":"rgba(255,85,85,0.08)",border:`2px solid ${testMode?"#00ff88":"#ff5555"}`,color:testMode?"#00ff88":"#ff5555",borderRadius:10,padding:"12px 20px",cursor:"pointer",fontFamily:"monospace",fontSize:13,fontWeight:"bold"}}>
                   SWITCH TO {testMode?"LIVE":"TEST"}
                 </button>
+              </div>
+
+              {!testMode && (
+                <div style={{fontSize:11,color:"#ffaa00",background:"rgba(255,170,0,0.08)",padding:"8px 10px",borderRadius:6}}>
+                  ⚠️ LIVE MODE ACTIVE — new registrations, check-ins and answers are being written to the internet database.
+                </div>
+              )}
+            </div>
+
+            {/* SUPABASE CONNECTION TESTER */}
+            <p style={SEC_LABEL}>SUPABASE CONNECTION</p>
+            <div style={{...CARD,marginBottom:16}}>
+              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                <button
+                  onClick={async () => {
+                    setSupabaseStatus("testing");
+                    const result = await testSupabaseConnection();
+                    setSupabaseStatus(result);
+                    if (result.ok) {
+                      showToast("Supabase connection OK — read + write both work");
+                    } else {
+                      showToast("Supabase test failed at step: " + result.step + " — " + result.error, "error");
+                    }
+                  }}
+                  disabled={supabaseStatus==="testing"}
+                  style={{background:"#111",border:"1px solid #00ff88",color:"#00ff88",borderRadius:8,padding:"10px 16px",cursor:"pointer",fontFamily:"monospace",fontSize:12}}>
+                  {supabaseStatus==="testing" ? "TESTING..." : "TEST SUPABASE CONNECTION"}
+                </button>
+
+                <button
+                  onClick={async () => {
+                    if (!confirm("This will PERMANENTLY DELETE all participants, checkins and answers from Supabase. Continue?")) return;
+                    await resetAllSupabaseData(showToast);
+                    // Also clear local state so the UI is fresh
+                    setParticipants([]); setCheckins([]); setGameAnswers([]);
+                  }}
+                  style={{background:"#3a0f0f",border:"1px solid #ff5555",color:"#ff8888",borderRadius:8,padding:"10px 16px",cursor:"pointer",fontFamily:"monospace",fontSize:12}}>
+                  RESET ALL DATA IN SUPABASE (fresh start)
+                </button>
+              </div>
+
+              {supabaseStatus && supabaseStatus !== "testing" && (
+                <div style={{marginTop:12,fontSize:12,fontFamily:"monospace",color:supabaseStatus.ok?"#00ff88":"#ff6666"}}>
+                  {supabaseStatus.ok
+                    ? "✓ Connection successful — read + write + cleanup all worked"
+                    : `✗ Failed at "${supabaseStatus.step}": ${supabaseStatus.error}`}
+                </div>
+              )}
+
+              <div style={{marginTop:10,fontSize:11,color:"#666"}}>
+                Current target: {SUPABASE_URL ? SUPABASE_URL.replace(/https?:\/\//,"").split(".")[0] + ".supabase.co" : "NOT CONFIGURED"}
               </div>
             </div>
 
@@ -1441,7 +1583,7 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
               </div>
             ))}
 
-            <p style={{fontFamily:"monospace",fontSize:10,color:"#444",marginTop:16,marginBottom:8}}>SUPABASE SQL SCHEMA</p>
+            <p style={{fontFamily:"monospace",fontSize:10,color:"#444",marginTop:16,marginBottom:8}}>SUPABASE SQL SCHEMA (run this once if tables are missing)</p>
             <div style={{background:"#080808",border:"1px solid #1a1a1a",borderRadius:8,padding:14,fontFamily:"monospace",fontSize:10,color:"#555",lineHeight:1.8,overflowX:"auto",whiteSpace:"pre"}}>
 {`-- Run this in Supabase SQL Editor
 create table participants (
@@ -1466,6 +1608,10 @@ create table game_answers (
   answers jsonb, score int,
   submitted_at timestamptz
 );`}
+            </div>
+
+            <div style={{fontSize:10,color:"#555",marginTop:16}}>
+              Tip: Since RLS is disabled on your project, the anon key can freely write. For production events you may want to re-enable RLS with stricter policies after the event.
             </div>
           </div>
         )}
