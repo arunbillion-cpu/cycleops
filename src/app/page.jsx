@@ -1,59 +1,43 @@
 'use client'
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  CYCLEOPS v3 — TACTICAL ENDURANCE EVENT MANAGER             ║
-// ║  Event Date: 30 May 2026                                    ║
-// ║  Scoring: 100 marks total across 5 games + timings          ║
+// ║  CYCLEOPS — TACTICAL ENDURANCE EVENT (30 May 2026)          ║
+// ║  40 km | 4 Teams | 4 Games | LIVE Supabase only             ║
 // ╚══════════════════════════════════════════════════════════════╝
 //
-// SCORING BREAKDOWN (100 MARKS TOTAL):
-// ─────────────────────────────────────
-// Arrival timings (CP1+CP2+CP3+Finish): 15 marks
-//   - 1st team at each CP: 5, 2nd: 4, 3rd: 3, 4th: 2
-//   - Finish: 1st:8, 2nd:6, 3rd:4, 4th:2
+// AMENDED SCORING (CONFIRMED):
+// ────────────────────────────────────────────────────────────────
+// Game A — Eye for Detail (at CP2): 30 marks
+//   15 questions (5 objects + 10 landmarks) × 2 marks each
+//   One team member answers for the team.
 //
-// Game 1 — Counter Intel Tracking Op (CP1):   20 marks
-//   - Each cyclist answers 5 MCQs (4 marks each)
-//   - Team score = average of all members
+// Game B — Endurance & Fortitude (Jerrican Carry CP2→FP):
+//   40 marks to the first team that finishes correctly with both
+//   5kg jerricans + all members, following hand-change rules.
+//   5 points penalty per violation (hand change every 2 km etc.).
 //
-// Game 2 — Endurance & Fortitude (CP1→CP2):  20 marks
-//   - Completion: 15 marks (ranked by closing time)
-//   - Rule compliance bonus: 5 marks (admin confirms)
-//   - Penalty: -5 marks per violation
+// Game C — Finish Questionnaire (at FP): 5 marks (Admin manual)
+//   1. Which rider consistently dropped back during the canal leg?
+//   2. Who gave wrong answers to eye for detail questionnaire at CP2?
+//   3. Who do you suspect is a saboteur in your team?
 //
-// Game 3 — Communication & Trust (CP2):       20 marks
-//   - Ranked by completion time: 1st:20, 2nd:15, 3rd:10, 4th:5
+// Game D — Rapid Fire Questionnaire: 15 marks (manual paper)
+//   Admin enters team scores after the event.
 //
-// Game 4 — Rapid Fire Quiz (CP3):             15 marks
-//   - 5 questions x 3 marks each
-//   - Team score = average of all members
+// CP1 and CP3 = Pure hydration & refreshments only (no scoring).
 //
-// Game 5 — Finish Questionnaire:              10 marks
-//   - 3 fill-in-blank questions
-//   - Admin awards 0-10 manually
+// DATABASE: Supabase — LIVE WRITES ONLY
+// ────────────────────────────────────────────────────────────────
+// All writes go directly to Supabase. No test mode.
+// See AMENDED_EVENT_PLAN.md for full details.
 //
-// DATABASE: Supabase (free tier)
-// ─────────────────────────────
-// TEST MODE: uses local state only (no DB writes)
-// LIVE MODE: writes to Supabase
-// Toggle in Admin → Settings → Mode
-//
-// SUPABASE SETUP:
-// 1. supabase.com → New project
-// 2. SQL Editor → run schema from SCORING_GUIDE.md
-// 3. Copy project URL + anon key into ENV below
-// 4. Add to .env.local:
-//    NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-//    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-
+// CONFIG (see .env.local.example)
 import { useState, useEffect, useRef, useCallback } from "react";
+import { supabase, safeInsert, safeUpsert } from "../../lib/supabase/client";
 
-// ══════════════════════════════════════
-// CONFIG
-// ══════════════════════════════════════
-const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL  || "https://swrtpnwkuqfhitzhgmwx.supabase.co";
-const SUPABASE_KEY  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3cnRwbndrdXFmaGl0emhnbXd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4NDM0MTcsImV4cCI6MjA5NTQxOTQxN30.B7GXbyTFXKhQyP-WkybFxnwwuFL3wTzzIN5QrIPNXII";
-const ADMIN_PIN     = "arun"; // Change before event
-const EVENT_DATE    = "30 May 2026";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const ADMIN_PIN    = "arun"; // CHANGE THIS before the event
+const EVENT_DATE   = "30 May 2026";
 
 // ══════════════════════════════════════
 // TEAMS
@@ -69,11 +53,131 @@ const TEAMS = [
 // CHECKPOINTS
 // ══════════════════════════════════════
 const CHECKPOINTS = [
-  { id:"start", name:"START",  label:"Event Start",            km:0,  icon:"🏁", qr:"CYCLEOPS-START" },
-  { id:"cp1",   name:"CP 1",   label:"Counter Intel + Load",   km:12, icon:"👁️", qr:"CYCLEOPS-CP1"   },
-  { id:"cp2",   name:"CP 2",   label:"Comms & Trust",          km:24, icon:"🤝", qr:"CYCLEOPS-CP2"   },
-  { id:"cp3",   name:"CP 3",   label:"Rapid Fire Quiz",        km:36, icon:"🧩", qr:"CYCLEOPS-CP3"   },
-  { id:"finish",name:"FINISH", label:"Finish Questionnaire",   km:40, icon:"🏆", qr:"CYCLEOPS-FINISH" },
+  { id:"start", name:"START (SP)", label:"Start Point",                    km:0,  icon:"🏁", qr:"CYCLEOPS-START" },
+  { id:"cp1",   name:"CP 1",       label:"Hydration & Refreshments",       km:16, icon:"💧", qr:"CYCLEOPS-CP1"   },
+  { id:"cp2",   name:"CP 2",       label:"Eye for Detail (30 marks)",      km:22, icon:"👁️", qr:"CYCLEOPS-CP2"   },
+  { id:"cp3",   name:"CP 3",       label:"Hydration & Refreshments",       km:31, icon:"💧", qr:"CYCLEOPS-CP3"   },
+  { id:"finish",name:"FINISH (FP)",label:"Finish + Jerrican + Questionnaire", km:40, icon:"🏆", qr:"CYCLEOPS-FINISH" },
+];
+
+// ══════════════════════════════════════
+// EYE FOR DETAIL — 15 Questions (CP2) — 30 marks total (2 per correct)
+// One team member answers for the whole team
+// ══════════════════════════════════════
+const EYE_FOR_DETAIL_QUESTIONS = [
+  // === 5 OBJECTS ===
+  {
+    id: 1,
+    type: "mcq",
+    question: "Near Hanut Chowk, two OG-coloured jerricans were placed. What numbers were painted on them?",
+    options: ["87 and 41", "41 and 23", "87 and 55", "41 and 19"],
+    correct: "87 and 41",
+  },
+  {
+    id: 2,
+    type: "mcq",
+    question: "At Chetak Chowk, a helmet with a number painted on it was placed on a red bench. What was the number?",
+    options: ["41", "87", "23", "55"],
+    correct: "41",
+  },
+  {
+    id: 3,
+    type: "mcq",
+    question: "What item was hanging on a tree near the torn poster/blow-up that said 'OP SINDOOR'?",
+    options: ["Jungle Shoes", "OG Jerrican", "Combat Helmet", "Ground Sheet"],
+    correct: "Jungle Shoes",
+  },
+  {
+    id: 4,
+    type: "mcq",
+    question: "A ground sheet was placed near a nala junction just before Kassiwala Gurudwara. How many red cellotape marks were shown on it for counting?",
+    options: ["Three", "Four", "Five", "Six"],
+    correct: "Four",
+  },
+  {
+    id: 5,
+    type: "mcq",
+    question: "Near an Axis Bank ATM, white tape (Newar) was shaped on a tree to display which number?",
+    options: ["41", "87", "23", "100"],
+    correct: "41",
+  },
+
+  // === 10 LANDMARKS ===
+  {
+    id: 6,
+    type: "mcq",
+    question: "There was a prominent quote in front of a Headquarters building you crossed. What did it say?",
+    options: [
+      "In war, resolution, in victory, magnanimity",
+      "The secret of getting ahead is getting started",
+      "Champions keep playing until they get it right",
+      "Fortune favours the brave"
+    ],
+    correct: "In war, resolution, in victory, magnanimity",
+  },
+  {
+    id: 7,
+    type: "text",
+    question: "The War Memorial you saw is being maintained by which unit?",
+    correct: "14 GARH RIF",
+  },
+  {
+    id: 8,
+    type: "mcq",
+    question: "On Bahadur Bridge, a signboard showed distances to three places. According to that board, how far is Patiala from that location?",
+    options: ["147 km", "219 km", "96 km", "172 km"],
+    correct: "147 km",
+  },
+  {
+    id: 9,
+    type: "text",
+    question: "The first bus stop you crossed after starting was located just ahead of which gate?",
+    correct: "Somnath Sharma Gate",
+  },
+  {
+    id: 10,
+    type: "text",
+    question: "Just ahead of Umrao Gate, across a national highway, there was a water theme park. What is its name?",
+    correct: "Chill-o-Thrill",
+  },
+  {
+    id: 11,
+    type: "mcq",
+    question: "What was the first fuel pump (petrol pump) you came across on the route?",
+    options: ["Hindustan Petroleum", "Indian Oil", "Bharat Petroleum", "Reliance"],
+    correct: "Hindustan Petroleum",
+  },
+  {
+    id: 12,
+    type: "mcq",
+    question: "Which was the FIRST prominent Gurudwara you crossed in Bhucho Kalan with green boards?",
+    options: [
+      "Dera Baba Rumi Wala Gurudwara",
+      "Dera Baba Dal Jiwan Singhji Gurudwara",
+      "Dera Baba Dayanandji Gurudwara",
+      "Gurdwara Shri Guru Gobind Singh Ji"
+    ],
+    correct: "Dera Baba Rumi Wala Gurudwara",
+  },
+  {
+    id: 13,
+    type: "text",
+    question: "Dera Baba Dayanandji (near the route) is actually what? (It is the only one of its kind on the route)",
+    correct: "Mandir",
+  },
+  {
+    id: 14,
+    type: "mcq",
+    question: "You saw prominent chimneys of a thermal plant. How many big thermal chimneys (main ones) did it have?",
+    options: ["Two", "Three", "Four", "Six"],
+    correct: "Four",
+  },
+  {
+    id: 15,
+    type: "text",
+    question: "In Bhucho Kalan, there is a School of Eminence associated with which NCC unit?",
+    correct: "20 Punjab Bn NCC",
+  },
 ];
 
 // ══════════════════════════════════════
@@ -81,128 +185,21 @@ const CHECKPOINTS = [
 // ══════════════════════════════════════
 const DEFAULT_SCORING = {
   arrival: {
-    label: "Arrival Timings",
+    label: "Arrival Timings (Legacy Bonus)",
     total: 15,
     perCP: { first:5, second:4, third:3, fourth:2 },
     finish: { first:8, second:6, third:4, fourth:2 },
-    note: "Points awarded per CP based on team closing time rank"
-  },
-  game1: {
-    label: "Game 1 — Counter Intel Tracking Op",
-    total: 20,
-    perQuestion: 4,
-    questions: 5,
-    note: "Individual MCQ, team score = average of all members"
-  },
-  game2: {
-    label: "Game 2 — Endurance & Fortitude (Jerrican)",
-    total: 20,
-    completion: { first:15, second:12, third:9, fourth:6 },
-    complianceBonus: 5,
-    penalty: -5,
-    note: "Ranked by closing time. +5 if all rules followed. -5 per violation"
-  },
-  game3: {
-    label: "Game 3 — Communication & Trust (Blindfold)",
-    total: 20,
-    byRank: { first:20, second:15, third:10, fourth:5 },
-    note: "Ranked by task completion time"
-  },
-  game4: {
-    label: "Game 4 — Rapid Fire Quiz",
-    total: 15,
-    perQuestion: 3,
-    questions: 5,
-    note: "Individual MCQ with humour option, team score = average"
-  },
-  game5: {
-    label: "Game 5 — Finish Questionnaire",
-    total: 10,
-    note: "Admin manually awards 0-10 based on answers"
+    note: "Optional bonus points based on check-in order (not core to new plan)"
   }
+  // Old game1–game5 entries removed during aggressive cleanup.
+  // Current core scoring: Eye for Detail 30 + Jerrican 40 (first correct) + Rapid Fire 15 + Finish Q 5
 };
 
-// ══════════════════════════════════════
-// GAME CONTENT
-// ══════════════════════════════════════
-
-// Game 1 — Counter Intel Tracking (same for all teams — items placed on route)
-const GAME1_QUESTIONS = [
-  {
-    q: "Which of these items did you spot hanging/placed prominently along the route?",
-    options: ["Lantern", "Bicycle pump", "Traffic cone", "Road sign"],
-    a: "Lantern",
-    funny: null
-  },
-  {
-    q: "What type of cooking equipment was observed near the route as a planted intelligence item?",
-    options: ["Pressure cooker", "Kettle for tea", "Gas stove", "Lunch box"],
-    a: "Kettle for tea",
-    funny: null
-  },
-  {
-    q: "Which helmet type was spotted as a planted marker along the route?",
-    options: ["Cycling helmet", "Construction helmet", "Ghost helmet", "Swimming cap"],
-    a: "Ghost helmet",
-    funny: null
-  },
-  {
-    q: "What ground covering item was observed as a planted intelligence marker?",
-    options: ["Carpet", "Ground sheet", "Tarpaulin", "Door mat"],
-    a: "Ground sheet",
-    funny: null
-  },
-  {
-    q: "Which of these rope/tape configurations was spotted as a non-standard tactical marker?",
-    options: ["Tape in standard knot", "Tape near a non-standard tactical knot", "Rope ladder", "Wire fence"],
-    a: "Tape near a non-standard tactical knot",
-    funny: null
-  },
-];
-
-// Game 4 — Rapid Fire Quiz (army + route awareness, with humour option)
-const GAME4_QUESTIONS = [
-  {
-    q: "What is the standard battle cry used by Indian Army infantry during a charge?",
-    options: ["Jai Hind!", "Bharat Mata Ki Jai!", "Jai Mata Di!", "I want my lunch!"],
-    a: "Jai Mata Di!",
-    funny: "I want my lunch!"
-  },
-  {
-    q: "What does the abbreviation 'CP' stand for in military field operations?",
-    options: ["Check Post", "Command Post", "Control Point", "Chai Point"],
-    a: "Check Post",
-    funny: "Chai Point"
-  },
-  {
-    q: "How many jerricans did your team carry during the Endurance Mission?",
-    options: ["One", "Two", "Three", "Zero — we outsourced it"],
-    a: "Two",
-    funny: "Zero — we outsourced it"
-  },
-  {
-    q: "What is the maximum weight one team member could carry during Game 2?",
-    options: ["5 kg for 1 km", "10 kg for 2 km", "5 kg for 2 km each carry", "Whatever they felt like"],
-    a: "5 kg for 2 km each carry",
-    funny: "Whatever they felt like"
-  },
-  {
-    q: "In the Blindfold Navigation game, what were the team members guiding their teammate towards?",
-    options: ["Enemy flag", "Their team coloured flag", "The finish line", "The nearest chai stall"],
-    a: "Their team coloured flag",
-    funny: "The nearest chai stall"
-  },
-];
-
-// Game 5 — Finish questionnaire (fill in the blank — same for all)
-const GAME5_QUESTIONS = [
-  "Which rider dropped back during the canal leg of the route?",
-  "Who gave the wrong answer during the interrogation at CP3?",
-  "Who do you suspect is the saboteur in your team? (Be honest!)"
-];
+// Old GAME* constants removed during aggressive cleanup (replaced by EYE_FOR_DETAIL_QUESTIONS and new manual scoring)
 
 // ══════════════════════════════════════
-// SUPABASE DB HELPER (raw REST — works with anon key)
+// SUPABASE DB HELPER (raw REST — LEGACY, being phased out)
+// Prefer the official client from lib/supabase/client.ts + safeInsert/safeUpsert
 // ══════════════════════════════════════
 async function supabaseQuery(table, method, data = null, filters = null) {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -233,28 +230,43 @@ async function supabaseQuery(table, method, data = null, filters = null) {
   }
 }
 
-// Test connection + basic write permission
+// Test connection + basic write permission (production-grade version)
 async function testSupabaseConnection() {
-  const testId = "conn_test_" + Date.now();
-  // Try a lightweight read first
-  const read = await supabaseQuery("participants", "GET", null, "limit=1");
-  if (read.error) return { ok: false, step: "read", error: read.error };
+  try {
+    // 1. Read test using official client
+    const { error: readError } = await supabase
+      .from("participants")
+      .select("id")
+      .limit(1);
 
-  // Try a write (we will immediately delete it)
-  const write = await supabaseQuery("participants", "POST", {
-    id: testId,
-    name: "CONNECTION_TEST",
-    age: 99,
-    phone: "0000000000",
-    emergency: "test",
-    team_id: "alpha",
-    registered_at: new Date().toISOString(),
-  });
-  if (write.error) return { ok: false, step: "write", error: write.error };
+    if (readError) {
+      return { ok: false, step: "read", error: readError.message };
+    }
 
-  // Clean up the test row
-  await supabaseQuery("participants", "DELETE", null, `id=eq.${testId}`);
-  return { ok: true, step: "ok" };
+    // 2. Lightweight write test using safe helper (we clean it up)
+    const testId = "conn_test_" + Date.now();
+    const writePayload = {
+      id: testId,
+      name: "CONNECTION_TEST",
+      age: 99,
+      phone: "0000000000",
+      emergency: "test",
+      team_id: "alpha",
+      registered_at: new Date().toISOString(),
+    };
+
+    const { error: writeError } = await safeInsert("participants", writePayload);
+    if (writeError) {
+      return { ok: false, step: "write", error: writeError.message || writeError };
+    }
+
+    // 3. Cleanup
+    await supabase.from("participants").delete().eq("id", testId);
+
+    return { ok: true, step: "ok" };
+  } catch (e) {
+    return { ok: false, step: "exception", error: e?.message || "Unknown error" };
+  }
 }
 
 // Full reset for fresh event start
@@ -326,7 +338,6 @@ function QRCode({ value, size = 160, color = "#00ff88", bg = "#0a0a0a" }) {
 export default function CycleOps() {
   // ── App state ──
   const [view, setView] = useState("home");
-  const [testMode, setTestMode] = useState(true); // TEST = local only, LIVE = Supabase
   const [showScanner, setShowScanner] = useState(false);
   const [toast, setToast] = useState(null);
   const [supabaseStatus, setSupabaseStatus] = useState(null); // null | "testing" | {ok:true} | {ok:false, error, step}
@@ -340,53 +351,170 @@ export default function CycleOps() {
   const [participants, setParticipants] = useState([]);
   const [checkins, setCheckins] = useState([]);
   const [gameAnswers, setGameAnswers] = useState([]); // all individual answers
-  const [game2Status, setGame2Status] = useState(   // per-team jerrican status
-    TEAMS.reduce((a,t)=>({...a,[t.id]:{completed:false,violation:false,penaltyCount:0,closingTime:null}}),{})
+  const [game2Status, setGame2Status] = useState(   // per-team jerrican status (repurposed for new 40-mark game)
+    TEAMS.reduce((a,t)=>({...a,[t.id]:{
+      started: false,
+      startTime: null,
+      finished: false,
+      finishTime: null,
+      penaltyCount: 0,
+      completed: false, // arrived with both jerricans + all members
+      rank: null
+    }}),{})
   );
-  const [game3Timers, setGame3Timers] = useState(   // per-team blindfold timer
-    TEAMS.reduce((a,t)=>({...a,[t.id]:{startTime:null,endTime:null,running:false,elapsed:0}}),{})
-  );
-  const [game5Marks, setGame5Marks] = useState(     // admin-awarded finish marks
+  // game3Timers removed during final cleanup (old blindfold game no longer used)
+  const [game5Marks, setGame5Marks] = useState(     // legacy - being phased out
     TEAMS.reduce((a,t)=>({...a,[t.id]:0}),{})
+  );
+
+  // Proper separate manual scores
+  const [manualScores, setManualScores] = useState(
+    TEAMS.reduce((a, t) => ({ ...a, [t.id]: { rapidFire: 0, finishQ: 0 } }), {})
   );
   const [scoring, setScoring] = useState(DEFAULT_SCORING);
 
   // ── UI state ──
   const [activeCP, setActiveCP] = useState(null);
-  const [regForm, setRegForm] = useState({name:"",age:"",phone:"",emergency:"",medical:false});
+  const [regForm, setRegForm] = useState({name:"",age:"",phone:"",emergency:"",medical:false, password:""});
 
-  // Game 3 timer tick
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setGame3Timers(prev => {
-        const updated = {...prev};
-        TEAMS.forEach(t => {
-          if (updated[t.id].running && updated[t.id].startTime) {
-            updated[t.id] = {...updated[t.id], elapsed: Math.floor((Date.now()-updated[t.id].startTime)/1000)};
-          }
-        });
-        return updated;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Persist testMode across refreshes (admin convenience)
-  useEffect(() => {
-    const saved = localStorage.getItem("cycleops_testMode");
-    if (saved !== null) {
-      setTestMode(saved === "true");
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("cycleops_testMode", String(testMode));
-  }, [testMode]);
+  // Old Game 3 timer effect removed during final cleanup
 
   const showToast = useCallback((msg, type="success") => {
     setToast({msg,type});
     setTimeout(()=>setToast(null),3500);
   }, []);
+
+  // Consistent DB error messaging for event day
+  const showDBError = useCallback((operation, error) => {
+    const msg = error?.message || error || "Unknown error";
+    showToast(`DB error during ${operation}: ${msg}. Check connection.`, "error");
+    console.error(`DB ${operation} failed:`, error);
+  }, [showToast]);
+
+  // Expose load function for Admin refresh button (already used)
+
+  // ============================================
+  // MANUAL SCORES PERSISTENCE
+  // ============================================
+  const saveManualScoresToDB = async (teamId, scores) => {
+    if (!SUPABASE_URL || !SUPABASE_KEY) return;
+
+    const payload = {
+      id: `manual_${teamId}`,
+      team_id: teamId,
+      rapid_fire: scores.rapidFire ?? 0,
+      finish_questionnaire: scores.finishQ ?? 0,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await safeUpsert("manual_scores", payload);
+    if (error) {
+      console.error("Manual scores DB save failed:", error);
+      // Fallback
+      await supabaseQuery("manual_scores", "POST", payload);
+    }
+  };
+
+  // Save jerrican status to Supabase jerrican_carry table (official client preferred)
+  const saveJerricanToDB = async (teamId, status) => {
+    const payload = {
+      id: `jerrican_${teamId}`,
+      team_id: teamId,
+      start_time: status.startTime,
+      finish_time: status.finishTime,
+      penalty_count: status.penaltyCount || 0,
+      completed: !!status.completed,
+      updated_at: new Date().toISOString()
+    };
+
+    const { error } = await safeUpsert("jerrican_carry", payload);
+    if (error) {
+      console.error("Jerrican DB save failed:", error);
+      // Fallback to legacy helper
+      await supabaseQuery("jerrican_carry", "POST", payload);
+    }
+  };
+
+  // ============================================
+  // DATA LOADING FROM SUPABASE (Official Client)
+  // ============================================
+  const loadEventDataFromDB = async () => {
+    if (!SUPABASE_URL || !SUPABASE_KEY) return;
+
+    try {
+      // 1. Load participants
+      const { data: participantsData, error: pErr } = await supabase
+        .from("participants")
+        .select("*")
+        .order("registered_at", { ascending: true });
+
+      if (!pErr && participantsData) {
+        setParticipants(participantsData);
+      }
+
+      // 2. Load checkins
+      const { data: checkinsData, error: cErr } = await supabase
+        .from("checkins")
+        .select("*");
+
+      if (!cErr && checkinsData) {
+        setCheckins(checkinsData);
+      }
+
+      // 3. Load game answers (including Eye for Detail)
+      const { data: answersData, error: aErr } = await supabase
+        .from("game_answers")
+        .select("*");
+
+      if (!aErr && answersData) {
+        setGameAnswers(answersData);
+      }
+
+      // 4. Load Jerrican carry data
+      const { data: jerricanData, error: jErr } = await supabase
+        .from("jerrican_carry")
+        .select("*");
+
+      if (!jErr && jerricanData) {
+        const newJerricanStatus = { ...game2Status };
+        jerricanData.forEach(row => {
+          if (row.team_id) {
+            newJerricanStatus[row.team_id] = {
+              ...newJerricanStatus[row.team_id],
+              started: !!row.start_time,
+              startTime: row.start_time,
+              finished: !!row.completed,
+              finishTime: row.finish_time,
+              penaltyCount: row.penalty_count || 0,
+              completed: !!row.completed,
+            };
+          }
+        });
+        setGame2Status(newJerricanStatus);
+      }
+
+      // 5. Load Manual Scores
+      const { data: manualData, error: mErr } = await supabase
+        .from("manual_scores")
+        .select("*");
+
+      if (!mErr && manualData) {
+        const newManual = { ...manualScores };
+        manualData.forEach(row => {
+          if (row.team_id) {
+            newManual[row.team_id] = {
+              rapidFire: row.rapid_fire ?? 0,
+              finishQ: row.finish_questionnaire ?? 0,
+            };
+          }
+        });
+        setManualScores(newManual);
+      }
+
+    } catch (e) {
+      console.warn("Failed to load some event data from Supabase", e);
+    }
+  };
 
   // ── Leaderboard calculation ──
   const leaderboard = useCallback(() => {
@@ -410,50 +538,74 @@ export default function CycleOps() {
         }
       });
 
-      // Game 1 score
-      const g1Answers = teamAnswers.filter(a=>a.game==="game1");
-      const g1Score = g1Answers.length>0 ? Math.round(g1Answers.reduce((s,a)=>s+a.score,0)/g1Answers.length) : 0;
+      // Eye for Detail (30 marks max)
+      const eyeAnswers = teamAnswers.filter(a => a.game === "eye_for_detail");
+      const eyeForDetailScore = eyeAnswers.length > 0 
+        ? Math.max(...eyeAnswers.map(a => a.score || 0)) 
+        : 0;
 
-      // Game 2 score
-      const g2 = game2Status[team.id];
-      let g2Score = 0;
-      if (g2.completed) {
-        const g2Checkins = checkins.filter(c=>c.cpId==="cp2"&&c.teamId===team.id);
-        const allCP2 = checkins.filter(c=>c.cpId==="cp2"&&g2.completed);
-        // simplified rank by closing time
-        const rank = g2.rank||3;
-        g2Score += [scoring.game2.completion.first,scoring.game2.completion.second,scoring.game2.completion.third,scoring.game2.completion.fourth][rank-1]||0;
-        if (!g2.violation) g2Score += scoring.game2.complianceBonus;
-        g2Score += g2.penaltyCount * scoring.game2.penalty;
-        g2Score = Math.max(0, g2Score);
+      // JERRICAN 40-MARK "FIRST TO FINISH" LOGIC
+      const j = game2Status[team.id] || {};
+      let jerricanScore = 0;
+
+      if (j.finished && j.completed) {
+        // Base points for finishing
+        const base = 25;
+        jerricanScore = base;
+
+        // Bonus for being first (40 total for the winner)
+        if (j.rank === 1) {
+          jerricanScore = 40;
+        } else if (j.rank === 2) {
+          jerricanScore = 28;
+        } else if (j.rank === 3) {
+          jerricanScore = 18;
+        } else {
+          jerricanScore = 10;
+        }
+
+        // Apply penalties (5 pts each)
+        jerricanScore = Math.max(0, jerricanScore - (j.penaltyCount || 0) * 5);
       }
 
-      // Game 3 score
-      const g3 = game3Timers[team.id];
-      let g3Score = 0;
-      if (g3.endTime) {
-        const allEnded = TEAMS.filter(t=>game3Timers[t.id].endTime).sort((a,b)=>game3Timers[a.id].elapsed-game3Timers[b.id].elapsed);
-        const rank = allEnded.findIndex(t=>t.id===team.id);
-        g3Score = [scoring.game3.byRank.first,scoring.game3.byRank.second,scoring.game3.byRank.third,scoring.game3.byRank.fourth][rank]||0;
-      }
+      // Manual scores (Rapid Fire + Finish Q)
+      const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0 };
+      const manualScore = (m.rapidFire || 0) + (m.finishQ || 0);
 
-      // Game 4 score
-      const g4Answers = teamAnswers.filter(a=>a.game==="game4");
-      const g4Score = g4Answers.length>0 ? Math.round(g4Answers.reduce((s,a)=>s+a.score,0)/g4Answers.length) : 0;
-
-      // Game 5 score
-      const g5Score = game5Marks[team.id]||0;
-
-      const total = arrivalScore+g1Score+g2Score+g3Score+g4Score+g5Score;
+      const total = arrivalScore + eyeForDetailScore + jerricanScore + manualScore;
 
       return {
         ...team, members, checkins:teamCheckins,
-        scores:{ arrival:arrivalScore, game1:g1Score, game2:g2Score, game3:g3Score, game4:g4Score, game5:g5Score, total },
+        scores:{ 
+          arrival: arrivalScore, 
+          eyeForDetail: eyeForDetailScore,
+          jerrican: jerricanScore,
+          manual: manualScore,
+          total 
+        },
       };
     }).sort((a,b)=>b.scores.total-a.scores.total).map((t,i)=>({...t,rank:i+1}));
-  }, [participants, checkins, gameAnswers, game2Status, game3Timers, game5Marks, scoring]);
+  }, [participants, checkins, gameAnswers, game2Status, manualScores, scoring]);
 
   const lb = leaderboard();
+
+  // Load all event data from Supabase on startup (using official client)
+  useEffect(() => {
+    loadEventDataFromDB();
+  }, []);  // Run once on mount
+
+  // Persist manual scores to DB whenever they change (admin actions)
+  useEffect(() => {
+    // Only save if we have real data
+    const hasData = Object.values(manualScores).some(
+      (m) => (m?.rapidFire ?? 0) > 0 || (m?.finishQ ?? 0) > 0
+    );
+    if (!hasData) return;
+
+    Object.entries(manualScores).forEach(([teamId, scores]) => {
+      saveManualScoresToDB(teamId, scores);
+    });
+  }, [manualScores]);
 
   // ── QR scan handler ──
   const handleQRScan = (code) => {
@@ -490,51 +642,93 @@ export default function CycleOps() {
       gps,
     };
     setCheckins(prev=>[...prev,checkin]);
-    if (!testMode && SUPABASE_URL) {
-      const res = await supabaseQuery("checkins","POST",checkin);
-      if (res.error) showToast("Live write failed (checkin): " + res.error, "error");
+    // Live write to Supabase using official client (with retry)
+    if (SUPABASE_URL && SUPABASE_KEY) {
+      const { error } = await safeInsert("checkins", checkin);
+      if (error) {
+        showDBError("check-in", error);
+      }
     }
     const cp = CHECKPOINTS.find(c=>c.id===activeCP);
     showToast(`✅ Checked in at ${cp?.name}! Time recorded.`);
 
     // Route to game if applicable
-    if (activeCP==="cp1") { setView("game1"); return; }
-    if (activeCP==="cp2") { setView("game3"); return; }
-    if (activeCP==="cp3") { setView("game4"); return; }
-    if (activeCP==="finish") { setView("game5"); return; }
+    if (activeCP==="cp2") { setView("eyeForDetail"); return; } // Eye for Detail (30 marks)
+    // CP1 and CP3 are pure hydration stops - no games
+    if (activeCP==="finish") { setView("dashboard"); return; }
     setView("home");
   };
 
-  // ── Register ──
+  // ── Register (with password + Access Code) ──
   const handleRegister = async () => {
-    if (!regForm.name||!regForm.age||!regForm.phone||!regForm.emergency) { showToast("Fill all fields","error"); return; }
-    if (!regForm.medical) { showToast("Medical declaration required","error"); return; }
-    const id = genId();
-    // Balanced team assignment
-    const existing = participants.length;
-    const teamIds = ["alpha","bravo","charlie","delta"];
-    const sorted = [...participants,{age:parseInt(regForm.age)}].sort((a,b)=>a.age-b.age);
-    const tempIdx = sorted.findIndex((p,i)=>i===sorted.length-1);
-    const assignedTeam = teamIds[tempIdx%4];
-    const newP = { id, ...regForm, age:parseInt(regForm.age), teamId:assignedTeam, registeredAt:new Date().toISOString() };
-    // Reassign all
-    const allP = [...participants,newP].sort((a,b)=>a.age-b.age).map((p,i)=>({...p,teamId:teamIds[i%4]}));
-    setParticipants(allP);
-    const me = allP.find(p=>p.id===id);
-    setCyclist(me);
-    if (!testMode && SUPABASE_URL) {
-      const res = await supabaseQuery("participants","POST",me);
-      if (res.error) showToast("Live write failed (register): " + res.error, "error");
+    if (!regForm.name || !regForm.age || !regForm.phone || !regForm.emergency || !regForm.password) {
+      showToast("Please fill all fields including password", "error");
+      return;
     }
-    setRegForm({name:"",age:"",phone:"",emergency:"",medical:false});
-    setView("dashboard");
-    showToast(`Registered! Team ${TEAMS.find(t=>t.id===me.teamId)?.name} ✓`);
+    if (!regForm.medical) {
+      showToast("Medical declaration required", "error");
+      return;
+    }
+
+    const id = genId();
+    // Generate a short memorable Access Code (e.g. CYC-7K9P)
+    const accessCode = "CYC-" + Math.random().toString(36).substring(2, 6).toUpperCase();
+
+    // Balanced team assignment (same logic as before)
+    const teamIds = ["alpha", "bravo", "charlie", "delta"];
+    const sorted = [...participants, { age: parseInt(regForm.age) }].sort((a, b) => a.age - b.age);
+    const tempIdx = sorted.findIndex((p, i) => i === sorted.length - 1);
+    const assignedTeam = teamIds[tempIdx % 4];
+
+    const newP = {
+      id,
+      ...regForm,
+      age: parseInt(regForm.age),
+      teamId: assignedTeam,
+      accessCode,
+      registeredAt: new Date().toISOString(),
+    };
+
+    // Re-assign teams for balance
+    const allP = [...participants, newP]
+      .sort((a, b) => a.age - b.age)
+      .map((p, i) => ({ ...p, teamId: teamIds[i % 4] }));
+
+    setParticipants(allP);
+    const me = allP.find(p => p.id === id);
+    setCyclist(me);
+
+    // Live write to Supabase using official client (with retry)
+    if (SUPABASE_URL && SUPABASE_KEY) {
+      const { error } = await safeInsert("participants", me);
+      if (error) {
+        showDBError("registration", error);
+      }
+    }
+
+    // Clear form
+    setRegForm({ name: "", age: "", phone: "", emergency: "", medical: false, password: "" });
+
+    // Show the important Access Code screen
+    setView("regSuccess");
+    // Store the just-registered details temporarily for the success screen
+    window.__justRegistered = { name: me.name, accessCode, team: TEAMS.find(t => t.id === me.teamId)?.name };
   };
 
-  // ── Login (returning cyclist) ──
-  const handleLogin = (phone) => {
-    const found = participants.find(p=>p.phone===phone.trim());
-    if (!found) { showToast("Phone not found — please register first","error"); return; }
+  // ── Login (Access Code + Password) ──
+  const handleLogin = (accessCode, password) => {
+    const code = (accessCode || "").trim().toUpperCase();
+    const pass = (password || "").trim();
+
+    const found = participants.find(
+      p => (p.accessCode || "").toUpperCase() === code && p.password === pass
+    );
+
+    if (!found) {
+      showToast("Invalid Access Code or Password. Please check your details.", "error");
+      return;
+    }
+
     setCyclist(found);
     setView("dashboard");
     showToast(`Welcome back, ${found.name}!`);
@@ -548,9 +742,13 @@ export default function CycleOps() {
     const score = correct*pointsEach;
     const entry = { id:genId(), cyclistId:cyclist.id, cyclistName:cyclist.name, teamId:cyclist.teamId, game, answers, score, correct, total:questions.length, submittedAt:new Date().toISOString() };
     setGameAnswers(prev=>[...prev.filter(a=>!(a.cyclistId===cyclist.id&&a.game===game)),entry]);
-    if (!testMode && SUPABASE_URL) {
-      const res = await supabaseQuery("game_answers","POST",entry);
-      if (res.error) showToast("Live write failed (game): " + res.error, "error");
+    // Live write to Supabase using official client (with retry)
+    if (SUPABASE_URL && SUPABASE_KEY) {
+      const { error } = await safeInsert("game_answers", entry);
+      if (error) {
+        console.error("Game answer write error:", error);
+        showToast("DB write failed (game). Data saved locally.", "error");
+      }
     }
     return { score, correct };
   };
@@ -567,7 +765,7 @@ export default function CycleOps() {
         <button onClick={()=>setView(cyclist?"dashboard":"home")} style={NAV_BRAND}>
           <span style={{color:"#00ff88",fontSize:20}}>◎</span>
           <span style={{color:"#fff",fontFamily:"monospace",fontSize:17,fontWeight:"bold",letterSpacing:3}}>CYCLEOPS</span>
-          {testMode && <span style={{background:"#ff000022",border:"1px solid #ff0000",color:"#ff6666",borderRadius:4,padding:"1px 6px",fontSize:9,fontFamily:"monospace"}}>TEST</span>}
+          
         </button>
         <div style={{display:"flex",gap:6}}>
           {cyclist && <div style={{background:"#111",border:"1px solid #222",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#00ff88",fontFamily:"monospace",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cyclist.name.split(" ")[0]}</div>}
@@ -577,39 +775,29 @@ export default function CycleOps() {
         </div>
       </nav>
 
-      {/* Global Test Mode banner — very hard to miss */}
-      {testMode && view !== "admin" && (
-        <div style={{
-          background:"linear-gradient(90deg,#3a0f0f,#2a0a0a)",
-          borderBottom:"1px solid #ff555533",
-          padding:"8px 16px",
-          fontSize:12,
-          fontFamily:"monospace",
-          color:"#ff8888",
-          display:"flex",
-          alignItems:"center",
-          gap:10
-        }}>
-          <span style={{background:"#ff000033",padding:"2px 6px",borderRadius:3}}>TEST MODE</span>
-          <span>Data is local only. Go to Admin → Settings to switch to LIVE and write to Supabase.</span>
-        </div>
-      )}
+
 
       <div style={{paddingBottom:50}}>
         {view==="home"       && <HomeView setView={setView} lb={lb} cyclist={cyclist} setShowScanner={setShowScanner} />}
         {view==="register"   && <RegisterView regForm={regForm} setRegForm={setRegForm} onSubmit={handleRegister} setView={setView} />}
         {view==="login"      && <LoginView onLogin={handleLogin} setView={setView} />}
+        {view==="regSuccess" && <RegSuccessView setView={setView} />}
         {view==="dashboard"  && <DashboardView cyclist={cyclist} setCyclist={setCyclist} lb={lb} checkins={checkins} gameAnswers={gameAnswers} setView={setView} setShowScanner={setShowScanner} activeCP={activeCP} setActiveCP={setActiveCP} showToast={showToast} />}
         {view==="cpCheckin"  && <CPCheckinView activeCP={activeCP} cyclist={cyclist} checkins={checkins} onCheckin={handleCPCheckin} setView={setView} />}
-        {view==="game1"      && <Game1View cyclist={cyclist} gameAnswers={gameAnswers} onSubmit={async (answers)=>await submitGameAnswers("game1",answers,GAME1_QUESTIONS,4)} setView={setView} showToast={showToast} />}
-        {view==="game3"      && <Game3View cyclist={cyclist} setView={setView} showToast={showToast} />}
-        {view==="game4"      && <Game4View cyclist={cyclist} gameAnswers={gameAnswers} onSubmit={async (answers)=>await submitGameAnswers("game4",answers,GAME4_QUESTIONS,3)} setView={setView} showToast={showToast} />}
-        {view==="game5"      && <Game5View cyclist={cyclist} gameAnswers={gameAnswers} setGameAnswers={setGameAnswers} testMode={testMode} setView={setView} showToast={showToast} />}
+        {view==="eyeForDetail" && <EyeForDetailView cyclist={cyclist} gameAnswers={gameAnswers} setGameAnswers={setGameAnswers} setView={setView} showToast={showToast} />}
         {view==="leaderboard"&& <LeaderboardView lb={lb} scoring={scoring} setView={setView} />}
         {view==="adminAuth"  && <AdminAuthView adminPin={adminPin} setAdminPin={setAdminPin} onAuth={()=>{if(adminPin===ADMIN_PIN){setAdminAuth(true);setView("admin");showToast("Admin access granted");}else showToast("Wrong PIN","error");}} setView={setView} />}
-        {view==="admin"      && adminAuth && <AdminView participants={participants} lb={lb} checkins={checkins} gameAnswers={gameAnswers} game2Status={game2Status} setGame2Status={setGame2Status} game3Timers={game3Timers} setGame3Timers={setGame3Timers} game5Marks={game5Marks} setGame5Marks={setGame5Marks} scoring={scoring} setScoring={setScoring} testMode={testMode} setTestMode={setTestMode} setView={setView} showToast={showToast} supabaseStatus={supabaseStatus} setSupabaseStatus={setSupabaseStatus} />}
+        {view==="admin"      && adminAuth && <AdminView 
+          participants={participants} lb={lb} checkins={checkins} gameAnswers={gameAnswers} 
+          game2Status={game2Status} setGame2Status={setGame2Status} 
+          manualScores={manualScores} setManualScores={setManualScores}
+          scoring={scoring} setScoring={setScoring} 
+          setView={setView} showToast={showToast} 
+          supabaseStatus={supabaseStatus} setSupabaseStatus={setSupabaseStatus}
+          onRefreshData={loadEventDataFromDB}
+        />}
         {view==="qrcodes"    && adminAuth && <QRCodesView setView={setView} />}
-        {view==="scoringGuide" && <ScoringGuideView scoring={scoring} setView={setView} />}
+        {view==="scoringGuide" && <ScoringGuideView setView={setView} />}
       </div>
     </div>
   );
@@ -628,7 +816,7 @@ function HomeView({ setView, lb, cyclist, setShowScanner }) {
           <div style={{fontFamily:"monospace",fontSize:62,fontWeight:"bold",lineHeight:0.9,letterSpacing:4,textShadow:"0 0 50px rgba(0,255,136,0.2)",marginBottom:16}}>
             CYCLE<br/><span style={{color:"#00ff88"}}>OPS</span>
           </div>
-          <div style={{fontFamily:"monospace",fontSize:11,color:"#555",letterSpacing:3}}>40 KM · 4 TEAMS · 5 GAMES · 100 MARKS</div>
+          <div style={{fontFamily:"monospace",fontSize:11,color:"#555",letterSpacing:3}}>40 KM · 4 TEAMS · 4 GAMES · LIVE</div>
           {lb.length>0&&lb[0].scores.total>0&&(
             <div style={{marginTop:18,display:"inline-flex",alignItems:"center",gap:12,background:"rgba(0,0,0,0.5)",border:"1px solid #1a1a1a",borderRadius:12,padding:"10px 20px"}}>
               <span style={{fontSize:24}}>{lb[0].emoji}</span>
@@ -698,12 +886,22 @@ function HomeView({ setView, lb, cyclist, setShowScanner }) {
 function RegisterView({ regForm, setRegForm, onSubmit, setView }) {
   return (
     <div className="fadeUp" style={{padding:"0 16px"}}>
-      <PageHeader icon="📝" title="REGISTRATION" sub="One-time setup · No password needed" />
+      <PageHeader icon="📝" title="REGISTRATION" sub="Set a password + get your Access Code" />
       <div style={CARD}>
         <Field label="FULL NAME *"><Input placeholder="Your full name" value={regForm.name} onChange={v=>setRegForm(p=>({...p,name:v}))} /></Field>
         <Field label="AGE *"><Input type="number" placeholder="Your age" value={regForm.age} onChange={v=>setRegForm(p=>({...p,age:v}))} /></Field>
-        <Field label="PHONE NUMBER * (used to log in)"><Input type="tel" placeholder="+91 9999999999" value={regForm.phone} onChange={v=>setRegForm(p=>({...p,phone:v}))} /></Field>
+        <Field label="PHONE NUMBER * (Emergency use only)"><Input type="tel" placeholder="+91 9999999999" value={regForm.phone} onChange={v=>setRegForm(p=>({...p,phone:v}))} /></Field>
         <Field label="EMERGENCY CONTACT *"><Input placeholder="Name & phone number" value={regForm.emergency} onChange={v=>setRegForm(p=>({...p,emergency:v}))} /></Field>
+        
+        <Field label="PASSWORD * (you will use this to log in later)">
+          <Input 
+            type="password" 
+            placeholder="Create a password" 
+            value={regForm.password} 
+            onChange={v=>setRegForm(p=>({...p,password:v}))} 
+          />
+        </Field>
+
         <div onClick={()=>setRegForm(p=>({...p,medical:!p.medical}))}
           style={{display:"flex",alignItems:"flex-start",gap:12,marginTop:16,cursor:"pointer",padding:14,background:regForm.medical?"rgba(0,255,136,0.06)":"#0a0a0a",border:`1px solid ${regForm.medical?"#00ff88":"#1a1a1a"}`,borderRadius:10}}>
           <div style={{width:24,height:24,minWidth:24,border:`2px solid ${regForm.medical?"#00ff88":"#333"}`,borderRadius:6,background:regForm.medical?"#00ff88":"transparent",display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -711,7 +909,8 @@ function RegisterView({ regForm, setRegForm, onSubmit, setView }) {
           </div>
           <span style={{fontSize:13,color:"#aaa",lineHeight:1.6}}>I declare I am medically fit to participate and have no conditions preventing cycling 40km.</span>
         </div>
-        <PBtn onClick={onSubmit} icon="⚡" label="REGISTER NOW" sub="Auto team assignment by age balance" style={{marginTop:16}} />
+
+        <PBtn onClick={onSubmit} icon="⚡" label="REGISTER NOW" sub="You will receive an Access Code after registration" style={{marginTop:16}} />
         <BkBtn onClick={()=>setView("home")} />
       </div>
     </div>
@@ -722,17 +921,234 @@ function RegisterView({ regForm, setRegForm, onSubmit, setView }) {
 // LOGIN VIEW
 // ══════════════════════════════════════
 function LoginView({ onLogin, setView }) {
-  const [phone, setPhone] = useState("");
+  const [accessCode, setAccessCode] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleSubmit = () => {
+    onLogin(accessCode, password);
+  };
+
   return (
     <div className="fadeUp" style={{padding:"0 16px"}}>
-      <PageHeader icon="🔑" title="CYCLIST LOGIN" sub="Enter your registered phone number" />
+      <PageHeader icon="🔑" title="CYCLIST LOGIN" sub="Enter your Access Code + Password" />
       <div style={CARD}>
-        <Field label="PHONE NUMBER"><Input type="tel" placeholder="+91 9999999999" value={phone} onChange={setPhone} /></Field>
-        <PBtn onClick={()=>onLogin(phone)} icon="→" label="LOG IN" style={{marginTop:16}} />
+        <Field label="ACCESS CODE (e.g. CYC-7K9P)">
+          <Input 
+            placeholder="CYC-XXXX" 
+            value={accessCode} 
+            onChange={setAccessCode}
+            onEnter={handleSubmit}
+          />
+        </Field>
+        <Field label="PASSWORD (you set during registration)">
+          <Input 
+            type="password" 
+            placeholder="Your password" 
+            value={password} 
+            onChange={setPassword}
+            onEnter={handleSubmit}
+          />
+        </Field>
+        <PBtn onClick={handleSubmit} icon="→" label="LOG IN" style={{marginTop:16}} />
         <div style={{textAlign:"center",margin:"12px 0",color:"#444",fontFamily:"monospace",fontSize:12}}>— OR —</div>
         <button onClick={()=>setView("register")} style={{...BTN_SEC,width:"100%"}}>REGISTER FIRST</button>
         <BkBtn onClick={()=>setView("home")} />
       </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════
+// REGISTRATION SUCCESS (shows Access Code)
+// ══════════════════════════════════════
+function RegSuccessView({ setView }) {
+  const data = window.__justRegistered || { name: "Cyclist", accessCode: "CYC-XXXX", team: "TEAM" };
+
+  return (
+    <div className="fadeUp" style={{padding:"0 16px"}}>
+      <PageHeader 
+        icon="✅" 
+        title="REGISTRATION COMPLETE" 
+        sub="Important — Save this information" 
+      />
+      
+      <div style={{...CARD, background:"#0a1f0a", border:"2px solid #00ff88", textAlign:"center"}}>
+        <div style={{fontSize:14, color:"#00ff88", marginBottom:8}}>WELCOME, {data.name.toUpperCase()}</div>
+        <div style={{fontSize:13, color:"#aaa", marginBottom:16}}>You have been assigned to</div>
+        <div style={{fontSize:28, fontWeight:"bold", color:"#00ff88", marginBottom:20}}>{data.team}</div>
+
+        <div style={{margin:"20px 0", padding:"16px", background:"#111", borderRadius:12}}>
+          <div style={{fontSize:12, color:"#888", marginBottom:6}}>YOUR ACCESS CODE</div>
+          <div style={{fontFamily:"monospace", fontSize:32, fontWeight:"bold", color:"#fff", letterSpacing:4}}>
+            {data.accessCode}
+          </div>
+        </div>
+
+        <div style={{fontSize:13, color:"#ffaa00", lineHeight:1.5, marginBottom:16}}>
+          ⚠️ <strong>Save this Access Code</strong> (write it down or photograph it).<br />
+          You will need this code + the password you created to log in later on any device.
+        </div>
+
+        <button 
+          onClick={() => {
+            delete window.__justRegistered;
+            setView("dashboard");
+          }} 
+          style={{...BTN_PRIMARY, width:"100%", justifyContent:"center", marginTop:8}}
+        >
+          I HAVE SAVED MY ACCESS CODE →
+        </button>
+      </div>
+
+      <div style={{marginTop:16, fontSize:12, color:"#555", textAlign:"center", fontFamily:"monospace"}}>
+        Your password is the one you created during registration.
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════
+// EYE FOR DETAIL VIEW (CP2) — 15 Questions, 30 marks
+// ══════════════════════════════════════
+function EyeForDetailView({ cyclist, gameAnswers, setGameAnswers, setView, showToast }) {
+  const [answers, setAnswers] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const [score, setScore] = useState(0);
+
+  const teamAnswers = gameAnswers.find(a => a.teamId === cyclist?.teamId && a.game === "eye_for_detail");
+
+  const handleAnswer = (qId, value) => {
+    setAnswers(prev => ({ ...prev, [qId]: value }));
+  };
+
+  const calculateScore = () => {
+    let correctCount = 0;
+    EYE_FOR_DETAIL_QUESTIONS.forEach(q => {
+      const userAns = (answers[q.id] || "").toString().trim().toLowerCase();
+      const correctAns = q.correct.toString().trim().toLowerCase();
+      if (userAns === correctAns) correctCount++;
+    });
+    return correctCount * 2;
+  };
+
+  const handleSubmit = async () => {
+    if (!cyclist) return;
+
+    const finalScore = calculateScore();
+    const entry = {
+      id: genId(),
+      cyclistId: cyclist.id,
+      cyclistName: cyclist.name,
+      teamId: cyclist.teamId,
+      game: "eye_for_detail",
+      answers,
+      score: finalScore,
+      totalQuestions: EYE_FOR_DETAIL_QUESTIONS.length,
+      submittedAt: new Date().toISOString(),
+    };
+
+    setGameAnswers(prev => [...prev.filter(a => !(a.teamId === cyclist.teamId && a.game === "eye_for_detail")), entry]);
+    setScore(finalScore);
+    setSubmitted(true);
+
+    // Live write to Supabase using official client (with retry)
+    if (SUPABASE_URL && SUPABASE_KEY) {
+      const { error } = await safeInsert("game_answers", entry);
+      if (error) {
+        showDBError("Eye for Detail submission", error);
+      } else {
+        showToast(`Submitted! Your team scored ${finalScore} / 30 marks`);
+      }
+    } else {
+      showToast(`Submitted locally! Team scored ${finalScore} / 30 marks`);
+    }
+  };
+
+  if (teamAnswers || submitted) {
+    const displayScore = submitted ? score : teamAnswers?.score || 0;
+    return (
+      <div className="fadeUp" style={{padding:"0 16px"}}>
+        <PageHeader icon="👁️" title="EYE FOR DETAIL" sub="CP2 • 30 marks" />
+        <div style={{...CARD, textAlign:"center", background:"#0a1f0a", borderColor:"#00ff88"}}>
+          <div style={{fontSize:48, fontWeight:"bold", color:"#00ff88"}}>{displayScore}</div>
+          <div style={{fontSize:18, color:"#fff"}}>out of 30 marks</div>
+          <div style={{marginTop:16, fontSize:13, color:"#aaa"}}>
+            Answers recorded for your team.<br />Thank you for your observation skills!
+          </div>
+        </div>
+
+        <PBtn 
+          onClick={() => {
+            // Quick way for team to mark they are ready for jerrican (admin still controls actual timing)
+            setView("dashboard");
+            showToast("Jerrican carry can now be started by organizers at CP2");
+          }} 
+          icon="⛽" 
+          label="READY FOR JERRICAN CARRY" 
+          sub="Inform organizers you are ready to start the 40-mark leg"
+          style={{marginTop:8}}
+        />
+
+        <BkBtn onClick={() => setView("dashboard")} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="fadeUp" style={{padding:"0 16px"}}>
+      <PageHeader icon="👁️" title="EYE FOR DETAIL" sub="CP2 • 15 Questions • 2 marks each = 30 marks" />
+      
+      <div style={{fontSize:12, color:"#ffaa00", background:"rgba(255,170,0,0.1)", padding:"8px 12px", borderRadius:8, marginBottom:16}}>
+        One team member should answer on behalf of the whole team. Be honest — this tests real observation.
+      </div>
+
+      {EYE_FOR_DETAIL_QUESTIONS.map((q, index) => (
+        <div key={q.id} style={{...CARD, marginBottom:12}}>
+          <div style={{fontSize:11, color:"#888", marginBottom:6}}>
+            Q{index + 1} of 15 • {q.type === "mcq" ? "Multiple Choice" : "Fill in the blank"}
+          </div>
+          <div style={{fontSize:14, marginBottom:10, lineHeight:1.4}}>{q.question}</div>
+
+          {q.type === "mcq" ? (
+            <select
+              value={answers[q.id] || ""}
+              onChange={(e) => handleAnswer(q.id, e.target.value)}
+              style={{width:"100%", background:"#111", border:"1px solid #333", color:"#fff", padding:"10px", borderRadius:8, fontSize:14}}
+            >
+              <option value="">-- Select an answer --</option>
+              {q.options.map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              placeholder="Type your answer here"
+              value={answers[q.id] || ""}
+              onChange={(v) => handleAnswer(q.id, v)}
+            />
+          )}
+        </div>
+      ))}
+
+      <button
+        onClick={handleSubmit}
+        disabled={Object.keys(answers).length < 10}
+        style={{
+          ...BTN_PRIMARY,
+          width:"100%",
+          justifyContent:"center",
+          marginTop:8,
+          opacity: Object.keys(answers).length < 10 ? 0.5 : 1
+        }}
+      >
+        SUBMIT TEAM ANSWERS (+2 per correct)
+      </button>
+
+      <div style={{fontSize:11, color:"#555", textAlign:"center", marginTop:8}}>
+        You can submit even if some questions are left blank.
+      </div>
+
+      <BkBtn onClick={() => setView("dashboard")} />
     </div>
   );
 }
@@ -802,7 +1218,7 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
       {/* Game scores */}
       <div style={CARD}>
         <p style={SEC_LABEL}>MY GAME SUBMISSIONS</p>
-        {[{id:"game1",label:"Counter Intel Tracking"},{id:"game4",label:"Rapid Fire Quiz"},{id:"game5",label:"Finish Questionnaire"}].map(g=>{
+        {[{id:"eyeForDetail",label:"Eye for Detail (CP2)"}].map(g=>{
           const ans = myAnswers.find(a=>a.game===g.id);
           return (
             <div key={g.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #0d0d0d"}}>
@@ -838,10 +1254,8 @@ function CPCheckinView({ activeCP, cyclist, checkins, onCheckin, setView }) {
           <div style={{fontSize:48,marginBottom:10}}>✅</div>
           <div style={{fontFamily:"monospace",fontSize:16,color:"#00ff88",fontWeight:"bold"}}>ALREADY CHECKED IN</div>
           <div style={{fontSize:12,color:"#555",marginTop:6}}>at {formatTime(already.timestamp)}</div>
-          {(activeCP==="cp1")&&<PBtn onClick={()=>setView("game1")} icon="▶" label="GO TO GAME 1" style={{marginTop:16}} />}
-          {(activeCP==="cp2")&&<PBtn onClick={()=>setView("game3")} icon="▶" label="GO TO GAME 3" style={{marginTop:16}} />}
-          {(activeCP==="cp3")&&<PBtn onClick={()=>setView("game4")} icon="▶" label="GO TO GAME 4" style={{marginTop:16}} />}
-          {(activeCP==="finish")&&<PBtn onClick={()=>setView("game5")} icon="▶" label="GO TO FINISH QUIZ" style={{marginTop:16}} />}
+          {(activeCP==="cp2")&&<PBtn onClick={()=>setView("eyeForDetail")} icon="▶" label="START EYE FOR DETAIL (30 marks)" style={{marginTop:16}} />}
+          {(activeCP==="finish")&&<PBtn onClick={()=>setView("dashboard")} icon="▶" label="BACK TO DASHBOARD" style={{marginTop:16}} />}
         </div>
       ) : (
         <div style={CARD}>
@@ -929,33 +1343,7 @@ function Game1View({ cyclist, gameAnswers, onSubmit, setView, showToast }) {
 
 // ══════════════════════════════════════
 // GAME 3 — Communication & Trust (Cyclist view — info only, admin controls)
-// ══════════════════════════════════════
-function Game3View({ cyclist, setView, showToast }) {
-  const team = TEAMS.find(t=>t.id===cyclist?.teamId);
-  return (
-    <div className="fadeUp" style={{padding:"0 16px"}}>
-      <PageHeader icon="🤝" title="COMMUNICATION & TRUST" sub="Game 3 at CP2 · 20 marks" />
-      <div style={{...CARD,background:`${team?.color||"#00ff88"}08`,borderColor:`${team?.color||"#00ff88"}22`}}>
-        <div style={{fontFamily:"monospace",fontSize:11,color:team?.color||"#00ff88",marginBottom:10}}>📋 GAME BRIEFING — TEAM {team?.name}</div>
-        <div style={{fontSize:14,color:"#ccc",lineHeight:1.8}}>
-          <b style={{color:"#fff"}}>Task:</b> One team member is blindfolded and guided only by voice from teammates 25 metres away (on a phone call). The blindfolded member must reach and touch your team's coloured flag.
-          <br/><br/>
-          <b style={{color:"#fff"}}>Your flag:</b> <span style={{color:team?.color,fontWeight:"bold"}}>{team?.emoji} {team?.name} coloured flag</span>
-          <br/><br/>
-          <b style={{color:"#fff"}}>Penalty:</b> Touching another team's flag = penalty points deducted.
-          <br/><br/>
-          <b style={{color:"#fff"}}>Scoring:</b> 1st to finish: 20 pts · 2nd: 15 pts · 3rd: 10 pts · 4th: 5 pts
-          <br/><br/>
-          <b style={{color:"#fff"}}>Note:</b> Admin controls the start/stop timer. Report to the organizer to begin.
-        </div>
-      </div>
-      <div style={{...CARD,textAlign:"center",marginTop:8}}>
-        <div style={{fontSize:11,color:"#555",fontFamily:"monospace"}}>Admin will record your time when complete</div>
-      </div>
-      <BkBtn onClick={()=>setView("dashboard")} />
-    </div>
-  );
-}
+// Game3View (old blindfold) removed during aggressive cleanup
 
 // ══════════════════════════════════════
 // GAME 4 — Rapid Fire Quiz
@@ -1028,7 +1416,7 @@ function Game4View({ cyclist, gameAnswers, onSubmit, setView, showToast }) {
 // ══════════════════════════════════════
 // GAME 5 — Finish Questionnaire
 // ══════════════════════════════════════
-function Game5View({ cyclist, gameAnswers, setGameAnswers, testMode, setView, showToast }) {
+function Game5View({ cyclist, gameAnswers, setGameAnswers, setView, showToast }) {
   const [answers, setAnswers] = useState(["","",""]);
   const already = gameAnswers.find(a=>a.cyclistId===cyclist?.id&&a.game==="game5");
 
@@ -1100,7 +1488,7 @@ function LeaderboardView({ lb, scoring, setView }) {
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,borderTop:"1px solid #111",paddingTop:12}}>
-            {[["ARRIVAL",team.scores.arrival],["GAME 1",team.scores.game1],["GAME 2",team.scores.game2],["GAME 3",team.scores.game3],["GAME 4",team.scores.game4],["GAME 5",team.scores.game5]].map(([label,val])=>(
+            {[["ARRIVAL",team.scores.arrival],["EYE FOR DETAIL",team.scores.eyeForDetail || 0],["JERRICAN",team.scores.game2],["FINISH Q (manual)",team.scores.game5]].map(([label,val])=>(
               <div key={label} style={{textAlign:"center"}}>
                 <div style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:"#aaa"}}>{val}</div>
                 <div style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>{label}</div>
@@ -1118,11 +1506,10 @@ function LeaderboardView({ lb, scoring, setView }) {
 // ══════════════════════════════════════
 // SCORING GUIDE VIEW
 // ══════════════════════════════════════
-function ScoringGuideView({ scoring, setView }) {
-  const entries = Object.entries(scoring);
+function ScoringGuideView({ setView }) {
   return (
     <div className="fadeUp" style={{padding:"0 16px"}}>
-      <PageHeader icon="📋" title="SCORING GUIDE" sub="Full breakdown · Total 100 marks" />
+      <PageHeader icon="📋" title="SCORING GUIDE" sub="Amended Plan • 30 May 2026" />
       <div style={{...CARD,marginBottom:16,background:"rgba(0,255,136,0.04)",borderColor:"rgba(0,255,136,0.15)"}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,textAlign:"center"}}>
           {entries.map(([key,s])=>(
@@ -1200,9 +1587,9 @@ function ScoringGuideView({ scoring, setView }) {
 function QRCodesView({ setView }) {
   const items = [
     {label:"REGISTRATION",value:"CYCLEOPS-REGISTER",icon:"📝",desc:"All participants scan to register",color:"#00ff88"},
-    {label:"CP 1 — KM 12",value:"CYCLEOPS-CP1",icon:"👁️",desc:"Counter Intel + Jerrican",color:"#4af0ff"},
-    {label:"CP 2 — KM 24",value:"CYCLEOPS-CP2",icon:"🤝",desc:"Comms & Trust",color:"#ffbb00"},
-    {label:"CP 3 — KM 36",value:"CYCLEOPS-CP3",icon:"🧩",desc:"Rapid Fire Quiz",color:"#ff5555"},
+    {label:"CP 1 — KM 16",value:"CYCLEOPS-CP1",icon:"💧",desc:"Hydration only",color:"#4af0ff"},
+    {label:"CP 2 — KM 22",value:"CYCLEOPS-CP2",icon:"👁️",desc:"Eye for Detail (30 marks)",color:"#ffbb00"},
+    {label:"CP 3 — KM 31",value:"CYCLEOPS-CP3",icon:"💧",desc:"Hydration only",color:"#4af0ff"},
     {label:"FINISH — KM 40",value:"CYCLEOPS-FINISH",icon:"🏆",desc:"Finish questionnaire",color:"#00ff88"},
     ...TEAMS.map(t=>({label:`TEAM ${t.name}`,value:`TEAM-${t.name}`,icon:t.emoji,desc:t.tagline,color:t.color})),
   ];
@@ -1252,13 +1639,8 @@ function AdminAuthView({ adminPin, setAdminPin, onAuth, setView }) {
 // ══════════════════════════════════════
 // ADMIN DASHBOARD
 // ══════════════════════════════════════
-function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, game3Timers, setGame3Timers, game5Marks, setGame5Marks, scoring, setScoring, testMode, setTestMode, setView, showToast, supabaseStatus, setSupabaseStatus }) {
+function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, manualScores, setManualScores, scoring, setScoring, setView, showToast, supabaseStatus, setSupabaseStatus, onRefreshData }) {
   const [tab, setTab] = useState("overview");
-  const fmt = (s) => s!=null?`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`:"—";
-
-  // Game 3 timer controls
-  const startG3 = (teamId) => setGame3Timers(p=>({...p,[teamId]:{...p[teamId],startTime:Date.now(),running:true,elapsed:0,endTime:null}}));
-  const stopG3  = (teamId) => setGame3Timers(p=>({...p,[teamId]:{...p[teamId],running:false,endTime:Date.now()}}));
 
   // Export CSV
   const exportCSV = () => {
@@ -1274,21 +1656,26 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
           <div>
             <h2 style={{fontFamily:"monospace",fontSize:22,fontWeight:"bold",letterSpacing:2}}>ADMIN CONSOLE</h2>
-            <div style={{fontSize:11,color:"#555",marginTop:2}}>Organizer control panel</div>
+            <div style={{fontSize:11,color:"#555",marginTop:2}}>Organizer control panel • LIVE</div>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <div style={{fontFamily:"monospace",fontSize:10,color:testMode?"#ff6666":"#00ff88"}}>{testMode?"TEST MODE":"LIVE MODE"}</div>
-            <button onClick={()=>setTestMode(p=>!p)}
-              style={{background:testMode?"rgba(255,0,0,0.1)":"rgba(0,255,136,0.1)",border:`1px solid ${testMode?"#ff000033":"#00ff8833"}`,color:testMode?"#ff6666":"#00ff88",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontFamily:"monospace",fontSize:11}}>
-              {testMode?"→ GO LIVE":"→ TEST"}
-            </button>
-          </div>
+          <button 
+            onClick={async () => {
+              if (onRefreshData) {
+                showToast("Refreshing data from Supabase...");
+                await onRefreshData();
+                showToast("Data refreshed from database");
+              }
+            }}
+            style={{background:"#111",border:"1px solid #00ff88",color:"#00ff88",padding:"6px 12px",borderRadius:6,fontFamily:"monospace",fontSize:11,cursor:"pointer"}}
+          >
+            ↻ REFRESH FROM DB
+          </button>
         </div>
       </div>
 
       {/* Tab bar */}
       <div style={{display:"flex",borderBottom:"1px solid #111",background:"rgba(6,6,6,0.97)",position:"sticky",top:54,zIndex:50,backdropFilter:"blur(8px)"}}>
-        {[["overview","📊","OVERVIEW"],["g2","⛽","GAME 2"],["g3","🎯","GAME 3"],["riders","👤","RIDERS"],["scores","🏆","SCORES"],["settings","⚙️","SETTINGS"]].map(([id,icon,label])=>(
+        {[["overview","📊","OVERVIEW"],["jerrican","⛽","JERRICAN"],["riders","👤","RIDERS"],["manual","✍️","MANUAL SCORES"],["settings","⚙️","SETTINGS"]].map(([id,icon,label])=>(
           <button key={id} onClick={()=>setTab(id)}
             style={{flex:1,padding:"10px 2px",background:"none",border:"none",borderBottom:`3px solid ${tab===id?"#00ff88":"transparent"}`,cursor:"pointer",color:tab===id?"#00ff88":"#555",transition:"all 0.2s"}}>
             <div style={{fontSize:16}}>{icon}</div>
@@ -1328,60 +1715,71 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
           </div>
         )}
 
-        {/* GAME 2 — Jerrican */}
-        {tab==="g2"&&(
+        {/* JERRICAN CARRY (40 marks for first correct team) */}
+        {tab==="jerrican"&&(
           <div>
             <div style={{...CARD,marginBottom:16,background:"rgba(255,187,0,0.04)",borderColor:"rgba(255,187,0,0.15)"}}>
-              <div style={{fontFamily:"monospace",fontSize:11,color:"#ffbb00",marginBottom:6}}>⛽ ENDURANCE & FORTITUDE — JERRICAN MISSION</div>
-              <div style={{fontSize:12,color:"#888",lineHeight:1.6}}>Two jerricans (5kg each) carried from CP1→CP2 (12 km). Max 2km per person. Admin confirms completion and rule compliance. Penalty per violation: {scoring.game2.penalty} marks.</div>
+              <div style={{fontFamily:"monospace",fontSize:13,color:"#ffbb00",marginBottom:6}}>⛽ JERRICAN CARRY • CP2 → FINISH</div>
+              <div style={{fontSize:12,color:"#888",lineHeight:1.5}}>
+                First team to arrive at Finish with both 5kg jerricans + all members + no violations = <strong>40 marks</strong>.<br />
+                5 points penalty per violation (hand change every 2 km etc.).
+              </div>
             </div>
-            {TEAMS.map(team=>{
-              const g2 = game2Status[team.id];
+
+            {TEAMS.map(team => {
+              const j = game2Status[team.id] || {};
+              const elapsed = j.startTime && !j.finished ? Math.floor((Date.now() - new Date(j.startTime))/1000) : null;
+              const isFirst = j.finished && j.completed && j.rank === 1;
+
               return (
-                <div key={team.id} style={{...CARD,marginBottom:12,borderColor:`${team.color}33`}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-                    <span style={{fontSize:24}}>{team.emoji}</span>
-                    <span style={{fontFamily:"monospace",fontSize:16,fontWeight:"bold",color:team.color,flex:1}}>{team.name}</span>
-                    <span style={{fontFamily:"monospace",fontSize:18,color:"#fff"}}>{g2.completed?(scoring.game2.completion[["first","second","third","fourth"][g2.rank-1]||"fourth"]+(g2.violation?0:scoring.game2.complianceBonus)+g2.penaltyCount*scoring.game2.penalty)+" pts":"Pending"}</span>
+                <div key={team.id} style={{...CARD, marginBottom:12, borderColor: `${team.color}33`}}>
+                  <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:10}}>
+                    <span style={{fontSize:22}}>{team.emoji}</span>
+                    <span style={{fontFamily:"monospace", fontSize:15, fontWeight:"bold", color:team.color, flex:1}}>{team.name}</span>
+                    {j.finished && <span style={{fontFamily:"monospace", fontSize:12, color: isFirst ? "#ffd700" : "#00ff88"}}>{isFirst ? "🏆 40 PTS" : "FINISHED"}</span>}
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                    <div style={{textAlign:"center",padding:12,background:"#080808",borderRadius:8,border:`1px solid ${g2.completed?"#00ff8833":"#1a1a1a"}`}}>
-                      <div style={{fontSize:20,marginBottom:4}}>{g2.completed?"✅":"⏳"}</div>
-                      <div style={{fontFamily:"monospace",fontSize:11,color:g2.completed?"#00ff88":"#555"}}>JERRICAN ARRIVED</div>
-                    </div>
-                    <div style={{textAlign:"center",padding:12,background:"#080808",borderRadius:8,border:`1px solid ${g2.violation?"#ff555533":"#1a1a1a"}`}}>
-                      <div style={{fontSize:20,marginBottom:4}}>{g2.violation?"⚠️":"✅"}</div>
-                      <div style={{fontFamily:"monospace",fontSize:11,color:g2.violation?"#ff5555":"#555"}}>RULE COMPLIANCE</div>
-                    </div>
+
+                  <div style={{fontFamily:"monospace", fontSize:12, color:"#888", marginBottom:8}}>
+                    {j.startTime ? `Started: ${new Date(j.startTime).toLocaleTimeString()}` : "Not started"}
+                    {j.finished && j.finishTime ? ` → Finished: ${new Date(j.finishTime).toLocaleTimeString()}` : ""}
+                    {j.penaltyCount > 0 && ` • Penalties: ${j.penaltyCount} (-${j.penaltyCount*5} pts)`}
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
-                    <div>
-                      <div style={{fontFamily:"monospace",fontSize:10,color:"#555",marginBottom:6}}>FINISH RANK</div>
-                      <select value={g2.rank||""} onChange={e=>setGame2Status(p=>({...p,[team.id]:{...p[team.id],rank:parseInt(e.target.value)||null}}))}
-                        style={{width:"100%",background:"#080808",border:"1px solid #1a1a1a",borderRadius:8,padding:"10px 12px",color:"#fff",fontFamily:"monospace",fontSize:14,outline:"none"}}>
-                        <option value="">Select rank</option>
-                        <option value="1">1st Place</option>
-                        <option value="2">2nd Place</option>
-                        <option value="3">3rd Place</option>
-                        <option value="4">4th Place</option>
-                      </select>
-                    </div>
-                    <div>
-                      <div style={{fontFamily:"monospace",fontSize:10,color:"#555",marginBottom:6}}>VIOLATIONS</div>
-                      <input type="number" min="0" max="5" value={g2.penaltyCount}
-                        onChange={e=>setGame2Status(p=>({...p,[team.id]:{...p[team.id],penaltyCount:parseInt(e.target.value)||0}}))}
-                        style={{width:"100%",background:"#080808",border:"1px solid #1a1a1a",borderRadius:8,padding:"10px 12px",color:"#fff",fontFamily:"monospace",fontSize:14,outline:"none",textAlign:"center"}} />
-                    </div>
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <button onClick={()=>setGame2Status(p=>({...p,[team.id]:{...p[team.id],completed:!p[team.id].completed}}))}
-                      style={{background:g2.completed?"rgba(0,255,136,0.1)":"#080808",border:`1px solid ${g2.completed?"#00ff88":"#222"}`,color:g2.completed?"#00ff88":"#888",borderRadius:10,padding:"10px",fontFamily:"monospace",fontSize:12,cursor:"pointer"}}>
-                      {g2.completed?"✅ COMPLETE":"MARK COMPLETE"}
-                    </button>
-                    <button onClick={()=>setGame2Status(p=>({...p,[team.id]:{...p[team.id],violation:!p[team.id].violation}}))}
-                      style={{background:g2.violation?"rgba(255,85,85,0.1)":"#080808",border:`1px solid ${g2.violation?"#ff5555":"#222"}`,color:g2.violation?"#ff5555":"#888",borderRadius:10,padding:"10px",fontFamily:"monospace",fontSize:12,cursor:"pointer"}}>
-                      {g2.violation?"⚠️ VIOLATION":"ADD VIOLATION"}
-                    </button>
+
+                  <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+                    {!j.startTime && (
+                      <button onClick={() => {
+                        const newStatus = {...(game2Status[team.id]||{}), started:true, startTime: new Date().toISOString() };
+                        setGame2Status(p => ({...p, [team.id]: newStatus }));
+                        saveJerricanToDB(team.id, newStatus);
+                        showToast(`${team.name} jerrican carry started`);
+                      }} style={{background:"#111", border:"1px solid #ffbb00", color:"#ffbb00", padding:"8px 14px", borderRadius:8, fontSize:12, cursor:"pointer"}}>
+                        START CARRY
+                      </button>
+                    )}
+
+                    {j.startTime && !j.finished && (
+                      <button onClick={() => {
+                        const newPenalty = (game2Status[team.id]?.penaltyCount || 0) + 1;
+                        const newStatus = {...(game2Status[team.id]||{}), penaltyCount: newPenalty };
+                        setGame2Status(p => ({...p, [team.id]: newStatus }));
+                        saveJerricanToDB(team.id, newStatus);
+                        showToast(`${team.name} +1 penalty (-5 pts)`);
+                      }} style={{background:"#111", border:"1px solid #ff5555", color:"#ff8888", padding:"8px 14px", borderRadius:8, fontSize:12, cursor:"pointer"}}>
+                        + PENALTY (5 pts)
+                      </button>
+                    )}
+
+                    {j.startTime && !j.finished && (
+                      <button onClick={() => {
+                        const now = new Date().toISOString();
+                        const newStatus = {...(game2Status[team.id]||{}), finished:true, finishTime: now, completed:true };
+                        setGame2Status(p => ({...p, [team.id]: newStatus }));
+                        saveJerricanToDB(team.id, newStatus);
+                        showToast(`${team.name} marked as finished with jerricans`);
+                      }} style={{background:"rgba(0,255,136,0.1)", border:"1px solid #00ff88", color:"#00ff88", padding:"8px 14px", borderRadius:8, fontSize:12, cursor:"pointer"}}>
+                        MARK FINISHED (both jerricans)
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -1389,45 +1787,65 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
           </div>
         )}
 
-        {/* GAME 3 — Blindfold timers */}
-        {tab==="g3"&&(
+        {/* MANUAL SCORES ENTRY - with the 3 Finish questions */}
+        {tab==="manual"&&(
           <div>
-            <div style={{...CARD,marginBottom:16,background:"rgba(74,240,255,0.04)",borderColor:"rgba(74,240,255,0.15)"}}>
-              <div style={{fontFamily:"monospace",fontSize:11,color:"#4af0ff",marginBottom:6}}>🤝 COMMUNICATION & TRUST — ADMIN TIMER CONTROL</div>
-              <div style={{fontSize:12,color:"#888",lineHeight:1.6}}>Start timer when blindfolded member begins. Stop when they touch their team's flag. Rankings auto-calculated by elapsed time.</div>
-            </div>
-            {TEAMS.map(team=>{
-              const g3 = game3Timers[team.id];
-              const allEnded = TEAMS.filter(t=>game3Timers[t.id].endTime).sort((a,b)=>game3Timers[a.id].elapsed-game3Timers[b.id].elapsed);
-              const rank = allEnded.findIndex(t=>t.id===team.id);
-              const pts = g3.endTime?[scoring.game3.byRank.first,scoring.game3.byRank.second,scoring.game3.byRank.third,scoring.game3.byRank.fourth][rank]||0:null;
-              return (
-                <div key={team.id} style={{...CARD,marginBottom:12,borderColor:`${team.color}33`}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-                    <span style={{fontSize:24}}>{team.emoji}</span>
-                    <span style={{fontFamily:"monospace",fontSize:16,fontWeight:"bold",color:team.color,flex:1}}>{team.name}</span>
-                    {pts!=null&&<span style={{fontFamily:"monospace",fontSize:18,color:"#00ff88"}}>{pts} pts · #{rank+1}</span>}
-                  </div>
-                  <div style={{textAlign:"center",marginBottom:14}}>
-                    <div style={{fontFamily:"monospace",fontSize:44,fontWeight:"bold",letterSpacing:4,color:g3.running?"#ffbb00":g3.endTime?"#00ff88":"#333"}}>
-                      {g3.endTime?`${String(Math.floor(g3.elapsed/60)).padStart(2,"0")}:${String(g3.elapsed%60).padStart(2,"0")}`:g3.running?`${String(Math.floor(g3.elapsed/60)).padStart(2,"0")}:${String(g3.elapsed%60).padStart(2,"0")}`:"00:00"}
-                    </div>
-                    {g3.endTime&&<div style={{fontSize:11,color:"#00ff88",fontFamily:"monospace",marginTop:4}}>COMPLETED</div>}
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <button onClick={()=>startG3(team.id)} disabled={g3.running||!!g3.endTime}
-                      style={{background:g3.running||g3.endTime?"#080808":"rgba(0,255,136,0.08)",border:`1px solid ${g3.running||g3.endTime?"#1a1a1a":"#00ff88"}`,color:g3.running||g3.endTime?"#444":"#00ff88",borderRadius:10,padding:"12px",fontFamily:"monospace",fontSize:13,fontWeight:"bold",cursor:g3.running||g3.endTime?"not-allowed":"pointer"}}>
-                      ▶ START
-                    </button>
-                    <button onClick={()=>stopG3(team.id)} disabled={!g3.running}
-                      style={{background:g3.running?"rgba(255,85,85,0.08)":"#080808",border:`1px solid ${g3.running?"#ff5555":"#1a1a1a"}`,color:g3.running?"#ff5555":"#444",borderRadius:10,padding:"12px",fontFamily:"monospace",fontSize:13,fontWeight:"bold",cursor:g3.running?"pointer":"not-allowed"}}>
-                      ⏹ STOP
-                    </button>
-                  </div>
-                  {!g3.running&&!g3.endTime&&<button onClick={()=>startG3(team.id)} style={{width:"100%",marginTop:8,background:"#080808",border:"1px solid #1a1a1a",color:"#666",borderRadius:10,padding:"8px",fontFamily:"monospace",fontSize:11,cursor:"pointer"}}>↺ RESET</button>}
+            <div style={{...CARD,marginBottom:16}}>
+              <div style={{fontFamily:"monospace",fontSize:14,color:"#4af0ff",marginBottom:8}}>✍️ MANUAL SCORE ENTRY</div>
+
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:12,color:"#ffaa00",marginBottom:6}}>FINISH QUESTIONNAIRE (0-5 total)</div>
+                <div style={{fontSize:11,color:"#888",marginBottom:8, lineHeight:1.4}}>
+                  1. Which rider consistently dropped back during the canal leg?<br />
+                  2. Who gave wrong answers to eye for detail questionnaire at CP2?<br />
+                  3. Who do you suspect is a saboteur in your team?
                 </div>
-              );
-            })}
+              </div>
+
+              {TEAMS.map(team => {
+                const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0 };
+                return (
+                  <div key={team.id} style={{...CARD, marginBottom:12, borderColor:`${team.color}33`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                      <span style={{fontSize:18}}>{team.emoji}</span>
+                      <span style={{fontFamily:"monospace",fontWeight:"bold",color:team.color,flex:1}}>{team.name}</span>
+                    </div>
+
+                    {/* Finish Questionnaire - shows the 3 questions */}
+                    <div style={{marginBottom:12}}>
+                      <div style={{fontSize:10,color:"#ffaa00",marginBottom:4}}>FINISH QUESTIONNAIRE (0-5)</div>
+                      <div style={{fontSize:11,color:"#888",marginBottom:6, lineHeight:1.3}}>
+                        1. Which rider consistently dropped back during the canal leg?<br />
+                        2. Who gave wrong answers to eye for detail at CP2?<br />
+                        3. Who do you suspect is a saboteur in your team?
+                      </div>
+                      <input 
+                        type="range" min="0" max="5" step="1" value={m.finishQ}
+                        onChange={e => {
+                          const val = parseInt(e.target.value);
+                          setManualScores(p => ({...p, [team.id]: {...p[team.id], finishQ: val }}));
+                        }}
+                        style={{width:"100%"}}
+                      />
+                      <div style={{textAlign:"right", fontSize:12, color:"#00ff88"}}>{m.finishQ}/5</div>
+                    </div>
+
+                    {/* Rapid Fire */}
+                    <div>
+                      <div style={{fontSize:10,color:"#555",marginBottom:4}}>RAPID FIRE (0-15)</div>
+                      <input 
+                        type="number" min="0" max="15" value={m.rapidFire}
+                        onChange={e => {
+                          const val = Math.max(0, Math.min(15, parseInt(e.target.value)||0));
+                          setManualScores(p => ({...p, [team.id]: {...p[team.id], rapidFire: val }}));
+                        }}
+                        style={{width:"100%",background:"#111",border:"1px solid #333",color:"#fff",padding:"6px",borderRadius:6,textAlign:"center"}} 
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -1446,6 +1864,11 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
                       <div style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:"#ddd"}}>{p.name}</div>
                       <div style={{fontSize:11,color:"#555",marginTop:3}}>Age {p.age} · {p.phone}</div>
                       <div style={{fontSize:11,color:"#555",marginTop:2}}>{pCheckins.length} check-ins</div>
+                      {p.accessCode && (
+                        <div style={{fontFamily:"monospace",fontSize:12,color:"#00ff88",marginTop:4, background:"#111", padding:"2px 6px", borderRadius:4, display:"inline-block"}}>
+                          Code: <strong>{p.accessCode}</strong>
+                        </div>
+                      )}
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontFamily:"monospace",fontSize:12,fontWeight:"bold",color:team?.color}}>{team?.emoji} {team?.name}</div>
@@ -1461,35 +1884,23 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
         {/* SCORES */}
         {tab==="scores"&&(
           <div>
-            <p style={{fontFamily:"monospace",fontSize:11,color:"#555",marginBottom:12}}>GAME 5 FINISH MARKS (0–10, admin-awarded)</p>
+            <p style={{fontFamily:"monospace",fontSize:11,color:"#555",marginBottom:12}}>MANUAL SCORES (Rapid Fire + Finish Questionnaire)</p>
             {TEAMS.map(team=>(
               <div key={team.id} style={{...CARD,marginBottom:10,borderColor:`${team.color}33`}}>
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
                   <span style={{fontSize:22}}>{team.emoji}</span>
                   <span style={{fontFamily:"monospace",fontSize:15,fontWeight:"bold",color:team.color,flex:1}}>{team.name}</span>
-                  <span style={{fontFamily:"monospace",fontSize:22,fontWeight:"bold",color:"#fff"}}>{game5Marks[team.id]||0}/10</span>
+                  <span style={{fontFamily:"monospace",fontSize:22,fontWeight:"bold",color:"#fff"}}>{(manualScores[team.id]?.rapidFire || 0) + (manualScores[team.id]?.finishQ || 0)}</span>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:12}}>
-                  <input type="range" min="0" max="10" value={game5Marks[team.id]||0}
-                    onChange={e=>setGame5Marks(p=>({...p,[team.id]:parseInt(e.target.value)}))}
+                  <input type="range" min="0" max="5" value={manualScores[team.id]?.finishQ || 0}
+                    onChange={e => setManualScores(p => ({...p, [team.id]: {...(p[team.id]||{}), finishQ: parseInt(e.target.value) }}))}
                     style={{flex:1,accentColor:team.color,cursor:"pointer"}} />
                 </div>
                 <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
-                  <span style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>0 — POOR</span>
-                  <span style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>10 — EXCELLENT</span>
+                  <span style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>0 — LOW</span>
+                  <span style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>5 — HIGH</span>
                 </div>
-                {/* Game 5 answers */}
-                {gameAnswers.filter(a=>a.teamId===team.id&&a.game==="game5").map(a=>(
-                  <div key={a.id} style={{background:"#080808",borderRadius:8,padding:10,marginTop:10}}>
-                    <div style={{fontFamily:"monospace",fontSize:10,color:"#555",marginBottom:6}}>{a.cyclistName}</div>
-                    {GAME5_QUESTIONS.map((q,i)=>(
-                      <div key={i} style={{marginBottom:8}}>
-                        <div style={{fontSize:10,color:"#666",marginBottom:2}}>{q}</div>
-                        <div style={{fontSize:13,color:"#ddd",background:"#0d0d0d",padding:"6px 10px",borderRadius:6}}>{a.answers[i]||"—"}</div>
-                      </div>
-                    ))}
-                  </div>
-                ))}
               </div>
             ))}
           </div>
@@ -1498,33 +1909,16 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
         {/* SETTINGS */}
         {tab==="settings"&&(
           <div>
-            {/* MODE TOGGLE — much clearer */}
             <p style={SEC_LABEL}>EVENT MODE</p>
-            <div style={{...CARD,marginBottom:16,borderColor:testMode?"#ff555533":"#00ff8833"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div>
-                  <div style={{fontFamily:"monospace",fontSize:18,fontWeight:"bold",color:testMode?"#ff6666":"#00ff88"}}>
-                    {testMode ? "TEST MODE" : "LIVE MODE"}
-                  </div>
-                  <div style={{fontSize:12,color:"#555",marginTop:4}}>
-                    {testMode ? "All data is local only — nothing reaches Supabase" : "Writes are going to Supabase right now"}
-                  </div>
-                </div>
-                <button onClick={()=>setTestMode(p=>!p)}
-                  style={{background:testMode?"rgba(0,255,136,0.08)":"rgba(255,85,85,0.08)",border:`2px solid ${testMode?"#00ff88":"#ff5555"}`,color:testMode?"#00ff88":"#ff5555",borderRadius:10,padding:"12px 20px",cursor:"pointer",fontFamily:"monospace",fontSize:13,fontWeight:"bold"}}>
-                  SWITCH TO {testMode?"LIVE":"TEST"}
-                </button>
+            <div style={{...CARD,marginBottom:16,borderColor:"#00ff8833"}}>
+              <div style={{fontFamily:"monospace",fontSize:16,fontWeight:"bold",color:"#00ff88"}}>LIVE MODE</div>
+              <div style={{fontSize:12,color:"#555",marginTop:4}}>
+                All registrations, check-ins and answers write directly to Supabase.
               </div>
-
-              {!testMode && (
-                <div style={{fontSize:11,color:"#ffaa00",background:"rgba(255,170,0,0.08)",padding:"8px 10px",borderRadius:6}}>
-                  ⚠️ LIVE MODE ACTIVE — new registrations, check-ins and answers are being written to the internet database.
-                </div>
-              )}
             </div>
 
             {/* SUPABASE CONNECTION TESTER */}
-            <p style={SEC_LABEL}>SUPABASE CONNECTION</p>
+            <p style={SEC_LABEL}>SUPABASE CONNECTION (Official Client)</p>
             <div style={{...CARD,marginBottom:16}}>
               <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
                 <button
