@@ -16,6 +16,12 @@ COMMENT ON COLUMN participants.access_code IS 'Unique code shown to cyclist afte
 COMMENT ON COLUMN participants.password IS 'Password chosen by cyclist during registration (plain text for this internal event app)';
 
 -- =====================================================
+-- CRITICAL: Reload PostgREST schema cache
+-- Run this after adding columns so Supabase sees them immediately
+-- =====================================================
+SELECT pg_notify('pgrst', 'reload schema');
+
+-- =====================================================
 -- 2. Recommended new tables for the new event structure
 -- (Run these too for full functionality)
 -- =====================================================
