@@ -211,6 +211,9 @@ const DEFAULT_SCORING = {
 // Test connection + basic write permission (production-grade version)
 async function testSupabaseConnection() {
   try {
+    // Debug marker - used to verify the deployed version on Vercel
+    console.log("[CycleOps Debug] Vercel Test v3 - Password fix + Debug marker applied at", new Date().toISOString());
+
     // 1. Read test using official client
     const { error: readError } = await supabase
       .from("participants")
@@ -230,6 +233,7 @@ async function testSupabaseConnection() {
       phone: "0000000000",
       emergency: "test",
       team_id: "alpha",
+      password: "test",
       registered_at: new Date().toISOString(),
     };
 
