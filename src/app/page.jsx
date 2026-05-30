@@ -879,7 +879,11 @@ export default function CycleOps() {
         {view==="home"       && <HomeView setView={setView} lb={lb} cyclist={cyclist} setShowScanner={setShowScanner} />}
         {view==="register"   && <RegisterView regForm={regForm} setRegForm={setRegForm} onSubmit={handleRegister} setView={setView} />}
         {view==="login"      && <LoginView onLogin={handleLogin} setView={setView} />}
-        {view==="regSuccess" && <RegSuccessView setView={setView} justRegistered={justRegistered} />}
+        {view==="regSuccess" && <RegSuccessView 
+          setView={setView} 
+          justRegistered={justRegistered} 
+          setJustRegistered={setJustRegistered} 
+        />}
         {view==="dashboard"  && <DashboardView cyclist={cyclist} setCyclist={setCyclist} lb={lb} checkins={checkins} gameAnswers={gameAnswers} setView={setView} setShowScanner={setShowScanner} activeCP={activeCP} setActiveCP={setActiveCP} showToast={showToast} />}
         {view==="cpCheckin"  && <CPCheckinView activeCP={activeCP} cyclist={cyclist} checkins={checkins} onCheckin={handleCPCheckin} setView={setView} />}
         {view==="eyeForDetail" && <EyeForDetailView cyclist={cyclist} gameAnswers={gameAnswers} setGameAnswers={setGameAnswers} setView={setView} showToast={showToast} />}
@@ -1075,7 +1079,7 @@ function LoginView({ onLogin, setView }) {
 // ══════════════════════════════════════
 // REGISTRATION SUCCESS (No Access Code anymore)
 // ══════════════════════════════════════
-function RegSuccessView({ setView, justRegistered }) {
+function RegSuccessView({ setView, justRegistered, setJustRegistered }) {
   const data = justRegistered || { name: "Cyclist", team: "TEAM" };
 
   return (
@@ -1106,7 +1110,7 @@ function RegSuccessView({ setView, justRegistered }) {
 
         <button 
           onClick={() => { 
-            setJustRegistered(null); 
+            if (setJustRegistered) setJustRegistered(null); 
             setView("dashboard"); 
           }} 
           style={{...BTN_PRIMARY, width:"100%", justifyContent:"center", marginTop:8}}
