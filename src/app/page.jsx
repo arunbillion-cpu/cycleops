@@ -301,10 +301,11 @@ export default function CycleOps() {
       finished: false,
       finishTime: null,
       penaltyCount: 0,
-      completed: false, // arrived with both jerricans + all members
+      completed: false,
       rank: null
     }}),{})
   );
+  const [jerricanFinishOrder, setJerricanFinishOrder] = useState([]);  // order in which teams finish jerrican carry (for ranking)
 
 
   // Proper separate manual scores
@@ -324,6 +325,9 @@ export default function CycleOps() {
 
   // Per-team last saved time for manual scores (for granular display)
   const [manualScoresLastSaved, setManualScoresLastSaved] = useState({});
+
+  // Registration success data (replaces fragile window.__justRegistered)
+  const [justRegistered, setJustRegistered] = useState(null);
 
   // ── UI state ──
   const [activeCP, setActiveCP] = useState(null);
@@ -723,6 +727,10 @@ export default function CycleOps() {
     // Route to game if applicable
     if (activeCP==="cp2") { setView("eyeForDetail"); return; } // Eye for Detail (30 marks)
     // CP1 and CP3 are pure hydration stops - no games
+    if (activeCP==="cp1" || activeCP==="cp3") { 
+      setView("hydrationStop"); 
+      return; 
+    }
     if (activeCP==="finish") { 
       setView("finishQuestionnaire"); 
       return; 
@@ -766,6 +774,9 @@ export default function CycleOps() {
     const me = allP.find(p => p.id === id);
     setCyclist(me);
 
+    // Clear form immediately after setting cyclist (Bug 2 fix)
+    setRegForm({ name: "", age: "", phone: "", emergency: "", medical: false, password: "" });
+
     // Live write to Supabase (send correct snake_case columns)
     if (SUPABASE_URL && SUPABASE_KEY) {
       const dbPayload = {
@@ -786,12 +797,9 @@ export default function CycleOps() {
       }
     }
 
-    // Clear form
-    setRegForm({ name: "", age: "", phone: "", emergency: "", medical: false, password: "" });
-
     // Show success screen (no access code anymore)
     setView("regSuccess");
-    window.__justRegistered = { name: me.name, team: TEAMS.find(t => t.id === me.teamId)?.name };
+    setJustRegistered({ name: me.name, team: TEAMS.find(t => t.id === me.teamId)?.name });
   };
 
   // ── Login (Name + Password) — Access Code removed ──
@@ -871,7 +879,7 @@ export default function CycleOps() {
         {view==="home"       && <HomeView setView={setView} lb={lb} cyclist={cyclist} setShowScanner={setShowScanner} />}
         {view==="register"   && <RegisterView regForm={regForm} setRegForm={setRegForm} onSubmit={handleRegister} setView={setView} />}
         {view==="login"      && <LoginView onLogin={handleLogin} setView={setView} />}
-        {view==="regSuccess" && <RegSuccessView setView={setView} />}
+        {view==="regSuccess" && <RegSuccessView setView={setView} justRegistered={justRegistered} />}
         {view==="dashboard"  && <DashboardView cyclist={cyclist} setCyclist={setCyclist} lb={lb} checkins={checkins} gameAnswers={gameAnswers} setView={setView} setShowScanner={setShowScanner} activeCP={activeCP} setActiveCP={setActiveCP} showToast={showToast} />}
         {view==="cpCheckin"  && <CPCheckinView activeCP={activeCP} cyclist={cyclist} checkins={checkins} onCheckin={handleCPCheckin} setView={setView} />}
         {view==="eyeForDetail" && <EyeForDetailView cyclist={cyclist} gameAnswers={gameAnswers} setGameAnswers={setGameAnswers} setView={setView} showToast={showToast} />}
@@ -885,11 +893,14 @@ export default function CycleOps() {
           setView={setView} showToast={showToast} 
           supabaseStatus={supabaseStatus} setSupabaseStatus={setSupabaseStatus}
           onRefreshData={loadEventDataFromDB}
-          onAdminLogout={() => { setAdminAuth(false); setView("home"); showToast("Logged out of Admin"); }}
+          onAdminLogout={() => { setAdminAuth(false); setAdminPin(""); setView("home"); showToast("Logged out of Admin"); }}
           lastDbSync={lastDbSync}
           setLastDbSync={setLastDbSync}
           manualScoresSaving={manualScoresSaving}
           manualScoresLastSaved={manualScoresLastSaved}
+          jerricanFinishOrder={jerricanFinishOrder}
+          setJerricanFinishOrder={setJerricanFinishOrder}
+          saveJerricanToDB={saveJerricanToDB}
         />}
         {view==="qrcodes"    && adminAuth && <QRCodesView setView={setView} />}
         {view==="scoringGuide" && <ScoringGuideView setView={setView} />}
@@ -900,6 +911,7 @@ export default function CycleOps() {
           gameAnswers={gameAnswers}
           setGameAnswers={setGameAnswers}
         />}
+        {view==="hydrationStop" && <HydrationStopView activeCP={activeCP} setView={setView} />}
       </div>
     </div>
   );
@@ -1063,8 +1075,8 @@ function LoginView({ onLogin, setView }) {
 // ══════════════════════════════════════
 // REGISTRATION SUCCESS (No Access Code anymore)
 // ══════════════════════════════════════
-function RegSuccessView({ setView }) {
-  const data = window.__justRegistered || { name: "Cyclist", team: "TEAM" };
+function RegSuccessView({ setView, justRegistered }) {
+  const data = justRegistered || { name: "Cyclist", team: "TEAM" };
 
   return (
     <div className="fadeUp" style={{padding:"0 16px"}}>
@@ -1093,9 +1105,9 @@ function RegSuccessView({ setView }) {
         </div>
 
         <button 
-          onClick={() => {
-            delete window.__justRegistered;
-            setView("dashboard");
+          onClick={() => { 
+            setJustRegistered(null); 
+            setView("dashboard"); 
           }} 
           style={{...BTN_PRIMARY, width:"100%", justifyContent:"center", marginTop:8}}
         >
@@ -1400,6 +1412,31 @@ function FinishQuestionnaireView({ cyclist, setView, showToast, gameAnswers, set
       </div>
 
       <BkBtn onClick={() => setView("dashboard")} />
+    </div>
+  );
+}
+
+// ══════════════════════════════════════
+// HYDRATION STOP VIEW (for CP1 and CP3 - no game activity)
+// ══════════════════════════════════════
+function HydrationStopView({ activeCP, setView }) {
+  const cp = CHECKPOINTS.find(c => c.id === activeCP);
+  return (
+    <div className="fadeUp" style={{padding:"0 16px", textAlign:"center"}}>
+      <PageHeader icon="" title={cp?.name || "CHECKPOINT"} sub="Hydration & Refreshments Stop" />
+      <div style={{...CARD, padding:28, textAlign:"center"}}>
+        <div style={{fontSize:56, marginBottom:16}}>✅</div>
+        <div style={{fontFamily:"monospace", fontSize:18, color:"#00ff88", fontWeight:"bold", marginBottom:12}}>CHECK-IN RECORDED</div>
+        <div style={{fontSize:14, color:"#aaa", lineHeight:1.7}}>
+          This is a hydration and refreshments stop.<br/>
+          <strong style={{color:"#fff"}}>No game activity here.</strong><br/>
+          Rest, hydrate, and continue the route.
+        </div>
+      </div>
+      <button onClick={() => setView("dashboard")} 
+        style={{...BTN_PRIMARY, width:"100%", marginTop:16, justifyContent:"center"}}>
+        BACK TO MY DASHBOARD
+      </button>
     </div>
   );
 }
@@ -1802,74 +1839,45 @@ function LeaderboardView({ lb, scoring, setView }) {
 function ScoringGuideView({ setView }) {
   return (
     <div className="fadeUp" style={{padding:"0 16px"}}>
-      <PageHeader icon="📋" title="SCORING GUIDE" sub="Amended Plan • 30 May 2026" />
-      <div style={{...CARD,marginBottom:16,background:"rgba(0,255,136,0.04)",borderColor:"rgba(0,255,136,0.15)"}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,textAlign:"center"}}>
-          {entries.map(([key,s])=>(
-            <div key={key}>
-              <div style={{fontFamily:"monospace",fontSize:20,fontWeight:"bold",color:"#00ff88"}}>{s.total}</div>
-              <div style={{fontSize:9,color:"#555",fontFamily:"monospace",marginTop:2}}>{s.label.split("—")[0].trim()}</div>
-            </div>
-          ))}
+      <PageHeader icon="📊" title="SCORING GUIDE" sub="How points are awarded" />
+
+      <div style={{...CARD, marginBottom:12}}>
+        <div style={{fontSize:13, color:"#888", marginBottom:12}}>Total possible: 90 points</div>
+
+        <div style={{padding:"12px 0", borderBottom:"1px solid #222"}}>
+          <div style={{display:"flex", justifyContent:"space-between"}}>
+            <div><div style={{fontWeight:600}}>Game A — Eye for Detail (CP2)</div><div style={{fontSize:12, color:"#666"}}>15 questions × 2 marks each</div></div>
+            <div style={{fontFamily:"monospace", fontWeight:"bold", color:"#00ff88"}}>30 pts</div>
+          </div>
+        </div>
+
+        <div style={{padding:"12px 0", borderBottom:"1px solid #222"}}>
+          <div style={{display:"flex", justifyContent:"space-between"}}>
+            <div><div style={{fontWeight:600}}>Game B — Jerrican Carry</div><div style={{fontSize:12, color:"#666"}}>First = 40, 2nd=28, 3rd=18, 4th=10. -5 per violation.</div></div>
+            <div style={{fontFamily:"monospace", fontWeight:"bold", color:"#00ff88"}}>40 pts max</div>
+          </div>
+        </div>
+
+        <div style={{padding:"12px 0", borderBottom:"1px solid #222"}}>
+          <div style={{display:"flex", justifyContent:"space-between"}}>
+            <div><div style={{fontWeight:600}}>Game C — Finish Questionnaire</div><div style={{fontSize:12, color:"#666"}}>Admin manual (0-5)</div></div>
+            <div style={{fontFamily:"monospace", fontWeight:"bold", color:"#00ff88"}}>5 pts</div>
+          </div>
+        </div>
+
+        <div style={{padding:"12px 0"}}>
+          <div style={{display:"flex", justifyContent:"space-between"}}>
+            <div><div style={{fontWeight:600}}>Game D — Rapid Fire</div><div style={{fontSize:12, color:"#666"}}>Admin manual (0-15)</div></div>
+            <div style={{fontFamily:"monospace", fontWeight:"bold", color:"#00ff88"}}>15 pts</div>
+          </div>
         </div>
       </div>
-      {entries.map(([key,s])=>(
-        <div key={key} style={{...CARD,marginBottom:12}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-            <div style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:"#fff",flex:1,paddingRight:10}}>{s.label}</div>
-            <div style={{background:"rgba(0,255,136,0.1)",border:"1px solid rgba(0,255,136,0.2)",borderRadius:8,padding:"4px 12px",fontFamily:"monospace",fontSize:16,fontWeight:"bold",color:"#00ff88",whiteSpace:"nowrap"}}>{s.total} MARKS</div>
-          </div>
-          <div style={{fontSize:12,color:"#666",lineHeight:1.6,marginBottom:8}}>{s.note}</div>
-          {key==="arrival"&&(
-            <div style={{background:"#080808",borderRadius:8,padding:10}}>
-              <div style={{fontFamily:"monospace",fontSize:10,color:"#555",marginBottom:6}}>PER CP (CP1/CP2/CP3)</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
-                {["1st","2nd","3rd","4th"].map((rank,i)=>(
-                  <div key={rank} style={{textAlign:"center"}}>
-                    <div style={{fontFamily:"monospace",fontSize:16,color:["#ffd700","#c0c0c0","#cd7f32","#888"][i]}}>{[s.perCP.first,s.perCP.second,s.perCP.third,s.perCP.fourth][i]}</div>
-                    <div style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>{rank}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{fontFamily:"monospace",fontSize:10,color:"#555",marginTop:10,marginBottom:6}}>FINISH LINE</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
-                {["1st","2nd","3rd","4th"].map((rank,i)=>(
-                  <div key={rank} style={{textAlign:"center"}}>
-                    <div style={{fontFamily:"monospace",fontSize:16,color:["#ffd700","#c0c0c0","#cd7f32","#888"][i]}}>{[s.finish.first,s.finish.second,s.finish.third,s.finish.fourth][i]}</div>
-                    <div style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>{rank}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {key==="game2"&&(
-            <div style={{background:"#080808",borderRadius:8,padding:10}}>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4,marginBottom:8}}>
-                {["1st","2nd","3rd","4th"].map((rank,i)=>(
-                  <div key={rank} style={{textAlign:"center"}}>
-                    <div style={{fontFamily:"monospace",fontSize:16,color:["#ffd700","#c0c0c0","#cd7f32","#888"][i]}}>{[s.completion.first,s.completion.second,s.completion.third,s.completion.fourth][i]}</div>
-                    <div style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>{rank}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{fontFamily:"monospace",fontSize:11,color:"#00ff88"}}>+{s.complianceBonus} compliance bonus · {s.penalty} per violation</div>
-            </div>
-          )}
-          {key==="game3"&&(
-            <div style={{background:"#080808",borderRadius:8,padding:10}}>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
-                {["1st","2nd","3rd","4th"].map((rank,i)=>(
-                  <div key={rank} style={{textAlign:"center"}}>
-                    <div style={{fontFamily:"monospace",fontSize:16,color:["#ffd700","#c0c0c0","#cd7f32","#888"][i]}}>{[s.byRank.first,s.byRank.second,s.byRank.third,s.byRank.fourth][i]}</div>
-                    <div style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>{rank}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
-      <BkBtn onClick={()=>setView("home")} />
+
+      <div style={{...CARD, background:"#111"}}>
+        <div style={{fontSize:12, color:"#888"}}>Note: Arrival timing bonuses are legacy/optional.</div>
+      </div>
+
+      <BkBtn onClick={() => setView("home")} />
     </div>
   );
 }
@@ -1988,7 +1996,7 @@ function AdminAuthView({ adminPin, setAdminPin, onAuth, setView }) {
 // ══════════════════════════════════════
 // ADMIN DASHBOARD
 // ══════════════════════════════════════
-function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, manualScores, setManualScores, scoring, setScoring, setView, showToast, supabaseStatus, setSupabaseStatus, onRefreshData, onAdminLogout, lastDbSync, setLastDbSync, manualScoresSaving, manualScoresLastSaved }) {
+function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, manualScores, setManualScores, scoring, setScoring, setView, showToast, supabaseStatus, setSupabaseStatus, onRefreshData, onAdminLogout, lastDbSync, setLastDbSync, manualScoresSaving, manualScoresLastSaved, jerricanFinishOrder, setJerricanFinishOrder, saveJerricanToDB }) {
   const [tab, setTab] = useState("overview");
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -2147,10 +2155,13 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
                     {j.startTime && !j.finished && (
                       <button onClick={() => {
                         const now = new Date().toISOString();
-                        const newStatus = {...(game2Status[team.id]||{}), finished:true, finishTime: now, completed:true };
+                        const newOrder = [...jerricanFinishOrder, team.id];
+                        const rank = newOrder.length; // 1 = first, 2 = second, etc.
+                        const newStatus = {...(game2Status[team.id]||{}), finished:true, finishTime: now, completed:true, rank };
+                        setJerricanFinishOrder(newOrder);
                         setGame2Status(p => ({...p, [team.id]: newStatus }));
                         saveJerricanToDB(team.id, newStatus, showToast);
-                        showToast(`${team.name} marked as finished with jerricans`);
+                        showToast(`${team.name} marked as finished with jerricans (Rank ${rank})`);
                       }} style={{background:"rgba(0,255,136,0.1)", border:"1px solid #00ff88", color:"#00ff88", padding:"8px 14px", borderRadius:8, fontSize:12, cursor:"pointer"}}>
                         MARK FINISHED (both jerricans)
                       </button>
