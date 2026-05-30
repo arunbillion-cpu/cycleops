@@ -1976,7 +1976,7 @@ function AdminAuthView({ adminPin, setAdminPin, onAuth, setView }) {
     <div className="fadeUp" style={{padding:"0 16px"}}>
       <PageHeader icon="⚙️" title="ADMIN ACCESS" sub={`Organizer console · PIN required`} />
       <div style={CARD}>
-        <Field label="ADMIN PIN"><Input type="password" maxLength={6} placeholder="••••" value={adminPin} onChange={setAdminPin} onEnter={onAuth} /></Field>
+        <Field label="ADMIN PIN"><Input type="password" placeholder="••••" value={adminPin} onChange={setAdminPin} onEnter={onAuth} /></Field>
         <div style={{fontSize:11,color:"#444",fontFamily:"monospace",textAlign:"center",marginTop:6}}>Default PIN: 1234</div>
         <PBtn onClick={onAuth} icon="🔓" label="AUTHENTICATE" style={{marginTop:16}} />
         <BkBtn onClick={()=>setView("home")} />
