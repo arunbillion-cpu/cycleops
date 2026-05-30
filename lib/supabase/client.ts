@@ -9,7 +9,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error(
     'Missing Supabase environment variables. ' +
-    'Please copy .env.local.example to .env.local and fill in your values.'
+    'Please copy .env.example to .env.local and fill in your values.'
   );
 }
 

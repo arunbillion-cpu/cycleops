@@ -1,128 +1,123 @@
-# CycleOps — Go Live Deployment Guide
+# CycleOps — Vercel + Supabase Deployment Guide
 
-**Event Date:** 30 May 2026  
-**Status:** Ready for Production
-
----
-
-## 1. Pre-Deployment Checklist
-
-Before deploying, complete these steps:
-
-- [ ] Change the Admin PIN in `src/app/page.jsx` (search for `ADMIN_PIN`)
-- [ ] Clean the Supabase database (delete all test data)
-- [ ] Test the full flow with real participant data in a staging environment
-- [ ] Verify `.env.local` has correct production Supabase keys
-- [ ] Decide on custom domain (optional but recommended)
+**Current Status (May 2026):**  
+The application has undergone major cleanup. 
+- Access Code login has been removed.
+- Authentication is now **Name + Team + Self-set Password**.
+- The Finish Point Questionnaire is now built directly into the app (no separate Google Form needed).
+- All database writes have been standardized to use snake_case payloads.
 
 ---
 
-## 2. Environment Variables
+## 1. Pre-Vercel Checklist (Do This First)
 
-### Required Variables
+Before connecting to Vercel, complete these steps:
+
+- [ ] Finish local testing with realistic data (highly recommended)
+- [ ] Change the Admin PIN in `src/app/page.jsx` (currently set to `"arun"`)
+- [ ] Verify your Supabase project is the correct one (the fresh project you created)
+- [ ] Confirm you only have the two required Supabase keys ready
+- [ ] Push the latest code to GitHub
+
+---
+
+## 2. Environment Variables (Only These Two Are Needed)
+
+You must set **only** these two variables in Vercel:
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-or-publishable-key
 ```
 
-**Important:** These must be set in your hosting platform (Vercel, etc.).
+### Critical Warning – Environment Variables
 
-### How to Get Them
+**Only** set these two variables:
 
-1. Go to your Supabase project dashboard
-2. Go to **Project Settings → API**
-3. Copy:
-   - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-   - `anon public` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
----
+**Never** use Vercel’s one-click “Connect to Supabase” integration. It will automatically inject 10+ Postgres-related variables (POSTGRES_URL, etc.). This has caused major problems in the past.
 
-## 3. Recommended Deployment (Vercel)
-
-This is the fastest and most reliable way for Next.js.
-
-### Steps:
-
-1. **Push your code to GitHub** (if not already)
-2. Go to [https://vercel.com](https://vercel.com) and sign in with GitHub
-3. Click **"Add New Project"**
-4. Import your `CycleOps` repository
-5. In the **Environment Variables** section, add:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-6. Click **Deploy**
-
-After deployment:
-- Vercel will give you a `*.vercel.app` URL
-- You can add a custom domain in the project settings later
+We only need the two `NEXT_PUBLIC_SUPABASE_*` variables because the app uses the official `@supabase/supabase-js` client on the client side.
 
 ---
 
-## 4. Supabase Production Notes
+## 3. Safe Deployment Workflow (Recommended)
 
-### For This Event (Recommended Settings)
+Because the database connection has historically been the most fragile part of this project, follow this order:
 
-Because this is a **one-day internal event**, the following setup is acceptable:
-
-- Row Level Security (RLS) can remain **disabled** on the tables during the event.
-- The anon key is used for all writes (this is by design for simplicity).
-
-### After the Event (Security Hardening)
-
-Once the event is over, you should:
-1. Enable RLS on all tables
-2. Create proper policies
-3. Consider moving to Supabase Auth + service role key for admin actions
+1. Finish solid local testing first (with simulated users).
+2. Push the latest code to GitHub.
+3. Connect / redeploy on Vercel.
+4. Add **only** the two Supabase variables above in Vercel (Production + Preview).
+5. Deploy to a **Preview** environment first.
+6. Test thoroughly on the Preview URL.
+7. Only promote to Production once you are confident.
 
 ---
 
-## 5. Post-Deployment Verification
+## 4. How to Add Environment Variables in Vercel (Critical Step)
 
-After deploying, test these flows:
+**Only add these two variables.** Do not add anything else.
 
-1. **Registration**
-   - Create a new participant
-   - Confirm they receive an Access Code
-   - Confirm they can log in with Access Code + Password
+1. Go to your Vercel project dashboard.
+2. Click **Settings** (top menu) → **Environment Variables**.
+3. Click **Add New**.
+4. Add the following **exactly**:
 
-2. **Eye for Detail (CP2)**
-   - Complete the 15-question form
-   - Verify score is saved (30 marks max)
+   | Name                              | Value                                      | Environments          |
+   |-----------------------------------|--------------------------------------------|-----------------------|
+   | `NEXT_PUBLIC_SUPABASE_URL`        | Your Supabase Project URL                  | Production + Preview  |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY`   | Your Supabase anon / publishable key       | Production + Preview  |
 
-3. **Jerrican Tracking (Admin)**
-   - Start a carry for a team
-   - Add penalties
-   - Mark as finished
-   - Verify it appears correctly in the leaderboard
+5. **Important**: After adding the variables, go to the **Deployments** tab and click **Redeploy** on the latest deployment (do **not** just push code — you must trigger a new build so the env vars are picked up).
 
-4. **Manual Scoring (Admin)**
-   - Enter Rapid Fire scores
-   - Enter Finish Questionnaire scores (the 3 questions)
-   - Verify totals update in the leaderboard
+**Common Mistake to Avoid**: Do **not** use Vercel’s “Connect Supabase” integration. It will inject many unnecessary Postgres variables and has caused problems before. Only add the two variables listed above manually.
 
 ---
 
-## 6. Important Reminders
+## 5. Supabase Settings for This Event
 
-- The **Admin PIN** is currently set to `"arun"`. Change this before the real event.
-- All data is stored in Supabase. Make sure you have a backup/export plan after the event.
-- The app is designed as a **single-day event tool**. It is not built for long-term multi-event use.
-
----
-
-## 7. Support & Rollback
-
-If something goes wrong on event day:
-
-- You can quickly redeploy from Vercel dashboard (takes ~1-2 minutes)
-- All data lives in Supabase — nothing is lost on redeploy
-- The "Refresh from DB" button in Admin can help recover state
+- Row Level Security (RLS) is currently disabled on all tables (acceptable for a single-day internal military event).
+- All reads and writes use the anon key.
+- After the event you can enable RLS + add policies if you wish to reuse the project.
 
 ---
 
-**You are ready to Go Live.**
+## 6. Post-Deployment Testing Checklist
 
-When you're ready, push the latest code to GitHub and deploy to Vercel following the steps above. 
+After going live on Vercel, verify these flows:
 
-Good luck with the event on 30 May 2026! 🏁
+- [ ] Registration works (Name + Team + Password)
+- [ ] Login works with Name + Password
+- [ ] Check-ins at SP, CP1, CP2, CP3, Finish
+- [ ] Eye for Detail submission (per person)
+- [ ] Finish Questionnaire submission (per person)
+- [ ] Admin can start Jerrican, add penalties, and mark teams as finished
+- [ ] Admin can enter Rapid Fire and Finish Questionnaire marks
+- [ ] Leaderboard shows correct scores and rankings
+
+---
+
+## 7. If Something Breaks
+
+- Check the Vercel deployment logs
+- Double-check that only the two Supabase keys are set (no extra Postgres vars)
+- Use the **Refresh from DB** button in the Admin panel
+- You can redeploy from Vercel in ~1-2 minutes
+
+---
+
+**Current Recommendation**
+
+We are now ready for Vercel from a documentation and configuration standpoint.
+
+Next steps I recommend:
+1. (Optional but strongly advised) Run the local test simulation with 8–10 users first.
+2. Push the latest code to GitHub.
+3. Connect the repo to Vercel.
+4. Add only the two Supabase environment variables (as described in section 4).
+5. Deploy to Preview first and test thoroughly.
+
+Ready when you are. Just say the word and I’ll walk you through the exact Vercel steps.

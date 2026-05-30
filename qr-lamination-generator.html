@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CycleOps – High Resolution QR Codes for Lamination</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Proper QR Code library (deterministic) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+    
+    body {
+      font-family: 'Inter', system_ui, sans-serif;
+    }
+    .title-font {
+      font-family: 'Space Grotesk', 'Inter', sans-serif;
+      font-weight: 600;
+    }
+    .qr-container {
+      background: white;
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+    }
+    .qr-label {
+      font-family: 'Space Grotesk', system_ui, sans-serif;
+      letter-spacing: -0.02em;
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-white">
+  <div class="max-w-6xl mx-auto px-6 py-10">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+      <div>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-emerald-500 rounded-2xl flex items-center justify-center">
+            <span class="text-2xl">🏁</span>
+          </div>
+          <div>
+            <h1 class="text-4xl font-semibold title-font tracking-tighter">CycleOps 2026</h1>
+            <p class="text-zinc-400 text-lg">High Resolution QR Codes • For Lamination</p>
+          </div>
+        </div>
+      </div>
+      <div class="text-right text-sm">
+        <div class="text-emerald-400 font-medium">30 May 2026 (Rescheduled)</div>
+        <div class="text-zinc-500">40 km Tactical Endurance Event</div>
+      </div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 mb-8">
+      <div class="flex items-start gap-4">
+        <div class="text-2xl mt-0.5">📋</div>
+        <div class="text-sm leading-relaxed">
+          <div class="font-semibold text-white mb-1">Instructions for Printing &amp; Lamination</div>
+          <ul class="text-zinc-400 space-y-1 list-disc list-inside">
+            <li>These are <strong>real, scannable QR codes</strong> (not visual patterns).</li>
+            <li>Download at <strong>1200px or 1600px</strong> for best print quality.</li>
+            <li>Print on A4 or A3 paper, laminate, and place at the actual physical location.</li>
+            <li>QR codes are deterministic — regenerating will always produce the identical code.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- QR Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="qr-grid">
+      <!-- Populated by JavaScript -->
+    </div>
+
+    <div class="mt-10 text-center text-xs text-zinc-500">
+      Generated for physical placement only • Do not share checkpoint QRs digitally
+    </div>
+  </div>
+
+  <script>
+    // Tailwind script
+    function initTailwind() {
+      document.documentElement.style.setProperty('--accent', '#10b981');
+    }
+
+    const checkpoints = [
+      {
+        id: "start",
+        label: "START POINT",
+        sublabel: "0 km",
+        value: "CYCLEOPS-START",
+        instruction: "Pl scan for START",
+        color: "#00ff88"
+      },
+      {
+        id: "cp1",
+        label: "CP 1",
+        sublabel: "16 km • Hydration Only",
+        value: "CYCLEOPS-CP1",
+        instruction: "Pl scan for CP1",
+        color: "#4af0ff"
+      },
+      {
+        id: "cp2",
+        label: "CP 2",
+        sublabel: "22 km • Eye for Detail (30 marks)",
+        value: "CYCLEOPS-CP2",
+        instruction: "Pl scan for CP2",
+        color: "#ffbb00"
+      },
+      {
+        id: "cp3",
+        label: "CP 3",
+        sublabel: "31 km • Hydration Only",
+        value: "CYCLEOPS-CP3",
+        instruction: "Pl scan for CP3",
+        color: "#4af0ff"
+      },
+      {
+        id: "finish",
+        label: "FINISH",
+        sublabel: "40 km • End of Event",
+        value: "CYCLEOPS-FINISH",
+        instruction: "Pl scan for FINISH",
+        color: "#00ff88"
+      }
+    ];
+
+    function createQRCard(checkpoint) {
+      const card = document.createElement("div");
+      card.className = "bg-zinc-900 border border-zinc-800 rounded-3xl p-6 flex flex-col";
+
+      card.innerHTML = `
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <div class="text-xl font-semibold qr-label" style="color: ${checkpoint.color}">${checkpoint.label}</div>
+            <div class="text-xs text-zinc-500 mt-0.5">${checkpoint.sublabel}</div>
+          </div>
+          <div class="text-right">
+            <div class="text-[10px] px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-400 font-mono tracking-widest">LIVE</div>
+          </div>
+        </div>
+
+        <!-- QR Preview -->
+        <div class="qr-container mx-auto mb-4" style="width: 260px; height: 260px;">
+          <div id="qr-preview-${checkpoint.id}" class="w-full h-full flex items-center justify-center"></div>
+        </div>
+
+        <!-- Instruction Text -->
+        <div class="text-center mb-4">
+          <div class="text-lg font-semibold text-white">${checkpoint.instruction}</div>
+          <div class="text-xs text-zinc-500 mt-1">Place this QR at the physical location</div>
+        </div>
+
+        <!-- Download Controls -->
+        <div class="mt-auto pt-4 border-t border-zinc-800">
+          <div class="text-xs text-zinc-400 mb-2 px-1">Download High Resolution</div>
+          <div class="flex gap-2">
+            <button onclick="downloadQR('${checkpoint.id}', '${checkpoint.value}', '${checkpoint.label}', 800)"
+                    class="flex-1 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 transition-colors text-sm py-2.5 rounded-2xl font-medium">
+              800 px
+            </button>
+            <button onclick="downloadQR('${checkpoint.id}', '${checkpoint.value}', '${checkpoint.label}', 1200)"
+                    class="flex-1 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-colors text-sm py-2.5 rounded-2xl font-semibold">
+              1200 px
+            </button>
+            <button onclick="downloadQR('${checkpoint.id}', '${checkpoint.value}', '${checkpoint.label}', 1600)"
+                    class="flex-1 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 transition-colors text-sm py-2.5 rounded-2xl font-medium">
+              1600 px
+            </button>
+          </div>
+          <div class="text-center text-[10px] text-zinc-500 mt-2">Recommended: 1200px or 1600px for lamination</div>
+        </div>
+      `;
+
+      return card;
+    }
+
+    function generatePreviewQR(containerId, value) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      container.innerHTML = '';
+
+      new QRCode(container, {
+        text: value,
+        width: 240,
+        height: 240,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.H
+      });
+    }
+
+    function downloadQR(id, value, label, size) {
+      // Create a temporary container for high-res rendering
+      const tempContainer = document.createElement("div");
+      tempContainer.style.position = "absolute";
+      tempContainer.style.left = "-9999px";
+      document.body.appendChild(tempContainer);
+
+      const qr = new QRCode(tempContainer, {
+        text: value,
+        width: size,
+        height: size,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.H
+      });
+
+      // Wait for QR to render
+      setTimeout(() => {
+        const canvas = tempContainer.querySelector("canvas");
+        if (!canvas) {
+          alert("Failed to generate QR. Please try again.");
+          document.body.removeChild(tempContainer);
+          return;
+        }
+
+        // Create final canvas with label
+        const finalCanvas = document.createElement("canvas");
+        const ctx = finalCanvas.getContext("2d", { alpha: false });
+
+        const padding = 80;
+        const textHeight = 110;
+        finalCanvas.width = size + (padding * 2);
+        finalCanvas.height = size + (padding * 2) + textHeight;
+
+        // White background
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+
+        // Draw QR code
+        ctx.drawImage(canvas, padding, padding);
+
+        // Add text below
+        ctx.fillStyle = "#000000";
+        ctx.font = "bold 42px system-ui, -apple-system, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(label, finalCanvas.width / 2, size + padding + 52);
+
+        ctx.font = "32px system-ui, -apple-system, sans-serif";
+        ctx.fillStyle = "#333333";
+        ctx.fillText("CYCLEOPS 2026 • 40 km Tactical Event", finalCanvas.width / 2, size + padding + 95);
+
+        // Download
+        const link = document.createElement("a");
+        const safeLabel = label.replace(/\s+/g, "-").toLowerCase();
+        link.download = `CycleOps-${safeLabel}-${size}px.png`;
+        link.href = finalCanvas.toDataURL("image/png");
+        link.click();
+
+        // Cleanup
+        document.body.removeChild(tempContainer);
+      }, 80);
+    }
+
+    function init() {
+      initTailwind();
+
+      const grid = document.getElementById("qr-grid");
+
+      checkpoints.forEach(cp => {
+        const card = createQRCard(cp);
+        grid.appendChild(card);
+
+        // Generate preview QR
+        setTimeout(() => {
+          generatePreviewQR(`qr-preview-${cp.id}`, cp.value);
+        }, 50);
+      });
+
+      // Keyboard hint
+      console.log("%c[CycleOps QR] High-res deterministic QR generator ready. Same input = same QR every time.", "color:#3f3f46");
+    }
+
+    // Initialize
+    window.onload = init;
+  </script>
+</body>
+</html>
