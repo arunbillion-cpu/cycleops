@@ -826,14 +826,17 @@ export default function CycleOps() {
 
     let dbSuccess = true;
 
-    // Live write to Supabase using official client (with retry)
-    if (SUPABASE_URL && SUPABASE_KEY) {
-      const dbPayload = toCheckinPayload(checkin);
-      const { error } = await safeInsert("checkins", dbPayload);
-      if (error) {
-        showDBError("check-in", error);
-        dbSuccess = false;
-      }
+    // Write via secure server-side API route
+    const checkinResponse = await fetch('/api/checkin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(checkin),
+    });
+
+    if (!checkinResponse.ok) {
+      const errorData = await checkinResponse.json();
+      showDBError("check-in", errorData);
+      dbSuccess = false;
     }
 
     const cp = CHECKPOINTS.find(c=>c.id===activeCP);
@@ -877,12 +880,9 @@ export default function CycleOps() {
     const tempIdx = sorted.findIndex((p, i) => i === sorted.length - 1);
     const assignedTeam = teamIds[tempIdx % 4];
 
-    const hashedPassword = await hashPassword(regForm.password);
-
     const newP = {
       id,
       ...regForm,
-      password: hashedPassword, // Store hashed password only
       age: parseInt(regForm.age),
       teamId: assignedTeam,
       registeredAt: new Date().toISOString(),
@@ -900,24 +900,26 @@ export default function CycleOps() {
     // Clear form immediately after setting cyclist (Bug 2 fix)
     setRegForm({ name: "", age: "", phone: "", emergency: "", medical: false, password: "" });
 
-    // Live write to Supabase (send correct snake_case columns)
-    if (SUPABASE_URL && SUPABASE_KEY) {
-      const dbPayload = {
+    // Write via secure server-side API route (using service_role key)
+    const registerResponse = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         id: me.id,
         name: me.name,
         age: me.age,
         phone: me.phone,
         emergency: me.emergency,
         medical: me.medical,
-        team_id: me.teamId,
-        password: me.password,
-        registered_at: me.registeredAt || new Date().toISOString(),
-      };
+        teamId: me.teamId,
+        password: regForm.password, // Send plain password — server will hash it
+        registeredAt: me.registeredAt,
+      }),
+    });
 
-      const { error } = await safeInsert("participants", dbPayload);
-      if (error) {
-        showDBError("registration", error);
-      }
+    if (!registerResponse.ok) {
+      const errorData = await registerResponse.json();
+      showDBError("registration", errorData);
     }
 
     // Show success screen (no access code anymore)
