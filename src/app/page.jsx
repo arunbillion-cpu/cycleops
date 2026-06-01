@@ -2305,6 +2305,29 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
   const [tab, setTab] = useState("overview");
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Auto-refresh from DB every 10 seconds while Admin is open (near real-time without Realtime subscriptions)
+  const isRefreshingRef = useRef(isRefreshing);
+  useEffect(() => {
+    isRefreshingRef.current = isRefreshing;
+  }, [isRefreshing]);
+
+  useEffect(() => {
+    if (!onRefreshData) return;
+
+    const interval = setInterval(async () => {
+      if (isRefreshingRef.current) return; // Avoid overlapping refreshes
+
+      try {
+        await onRefreshData();
+        setLastDbSync(new Date());
+      } catch (e) {
+        // Silent fail for background auto-refresh
+      }
+    }, 10000); // 10 seconds
+
+    return () => clearInterval(interval);
+  }, [onRefreshData, setLastDbSync]);
+
   // Export CSV
   const exportCSV = () => {
     const rows=[["Rank","Team","Total","Arrival","Game1","Game2","Game3","Game4","Game5","Members"],...lb.map(t=>[t.rank,t.name,t.scores.total,t.scores.arrival,t.scores.game1,t.scores.game2,t.scores.game3,t.scores.game4,t.scores.game5,t.members.length])];
@@ -2319,11 +2342,14 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
           <div>
             <h2 style={{fontFamily:"monospace",fontSize:22,fontWeight:"bold",letterSpacing:2}}>ADMIN CONSOLE</h2>
-            <div style={{fontSize:11,color:"#555",marginTop:2, display:"flex", alignItems:"center", gap:8}}>
+            <div style={{fontSize:11,color:"#555",marginTop:2, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
               Organizer control panel • LIVE
+              <span style={{background:"#112211", color:"#66ff99", padding:"1px 6px", borderRadius:4, fontSize:10}}>
+                Auto-refresh every 10s
+              </span>
               {lastDbSync ? (
                 <span style={{background:"#0a2a0a", color:"#00ff88", padding:"1px 6px", borderRadius:4, fontSize:10}}>
-                  Last DB write: {lastDbSync.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}
+                  Last synced: {lastDbSync.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}
                 </span>
               ) : (
                 <span style={{background:"#2a1a0a", color:"#ffaa00", padding:"1px 6px", borderRadius:4, fontSize:10}}>
