@@ -1,10 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import bcrypt from 'bcryptjs';
+import { rateLimit, getClientIP } from '@/lib/rate-limit';
 
 export async function POST(request: NextRequest) {
   if (!supabaseAdmin) {
     return NextResponse.json({ error: 'Server not configured for secure writes' }, { status: 500 });
+  }
+
+  // === Rate Limiting: Max 5 registrations per IP every 10 minutes ===
+  const ip = getClientIP(request);
+  const { allowed, remaining, resetTime } = rateLimit(ip, {
+    limit: 5,
+    windowMs: 10 * 60 * 1000, // 10 minutes
+  });
+
+  if (!allowed) {
+    const resetDate = new Date(resetTime);
+    return NextResponse.json(
+      {
+        error: 'Too many registration attempts. Please wait before trying again.',
+        retryAfter: Math.ceil((resetTime - Date.now()) / 1000),
+      },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': Math.ceil((resetTime - Date.now()) / 1000).toString(),
+        },
+      }
+    );
   }
 
   try {

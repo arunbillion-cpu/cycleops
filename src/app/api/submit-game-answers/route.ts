@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { rateLimit, getClientIP } from '@/lib/rate-limit';
 
 export async function POST(request: NextRequest) {
   if (!supabaseAdmin) {
     return NextResponse.json({ error: 'Server not configured for secure writes' }, { status: 500 });
+  }
+
+  // === Rate Limiting: Max 3 game submissions per IP every 5 minutes ===
+  const ip = getClientIP(request);
+  const { allowed } = rateLimit(ip, {
+    limit: 3,
+    windowMs: 5 * 60 * 1000, // 5 minutes
+  });
+
+  if (!allowed) {
+    return NextResponse.json(
+      { error: 'Too many submissions. Please wait a few minutes before trying again.' },
+      { status: 429 }
+    );
   }
 
   try {
