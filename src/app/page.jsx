@@ -958,6 +958,11 @@ export default function CycleOps() {
   if (isLoadingData) {
     return (
       <div style={{ minHeight:"100vh",background:"#060606",color:"#fff",maxWidth:480,margin:"0 auto", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column" }}>
+        <img 
+          src="/logo.png" 
+          alt="Logo" 
+          style={{ height: 64, width: "auto", marginBottom: 16, objectFit: "contain" }} 
+        />
         <div style={{fontFamily:"monospace", fontSize:24, marginBottom:12}}>CYCLEOPS</div>
         <div style={{color:"#00ff88"}}>Loading event data...</div>
         <div style={{fontSize:12, color:"#555", marginTop:8}}>Connecting to database</div>
@@ -975,9 +980,12 @@ export default function CycleOps() {
       {/* NAV */}
       <nav style={NAV}>
         <button onClick={()=>setView(cyclist?"dashboard":"home")} style={NAV_BRAND}>
-          <span style={{color:"#00ff88",fontSize:20}}>◎</span>
+          <img 
+            src="/logo.png" 
+            alt="Logo" 
+            style={{ height: 26, width: "auto", marginRight: 8, objectFit: "contain" }} 
+          />
           <span style={{color:"#fff",fontFamily:"monospace",fontSize:17,fontWeight:"bold",letterSpacing:3}}>CYCLEOPS</span>
-          
         </button>
         <div style={{display:"flex",gap:6}}>
           {cyclist && <div style={{background:"#111",border:"1px solid #222",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#00ff88",fontFamily:"monospace",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cyclist.name.split(" ")[0]}</div>}
