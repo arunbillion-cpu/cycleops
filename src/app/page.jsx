@@ -47,8 +47,9 @@ const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const ADMIN_PIN    = "arunbhaskar6014"; // CHANGE THIS before the event
 const EVENT_DATE   = "13 Jun 2026";
 
-// NOTE: bcryptjs import removed from this file (moved to server-side /api/login and /api/register).
-// This commit is to force a fresh Vercel deployment with the client bundle fix.
+// NOTE: bcryptjs import has been REMOVED from this client file.
+// All password hashing now happens server-side in /api/login and /api/register.
+// This is a fresh commit to force Vercel to build the fixed version without the module-not-found error.
 
 // ══════════════════════════════════════
 // TEAMS
