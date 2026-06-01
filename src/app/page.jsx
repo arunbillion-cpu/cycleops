@@ -759,19 +759,25 @@ export default function CycleOps() {
     }
 
     // Legacy opaque codes (for transition / old printed signs)
-    const u = raw.toUpperCase();
+    const u = raw.toUpperCase().trim();
     if (u === "CYCLEOPS-REGISTER") { setView("register"); return; }
 
-    const legacyCp = CHECKPOINTS.find(c => c.qr === u); // old field may still exist on some data
+    // Support old "CYCLEOPS-CP3" format + new qrKey format during transition
+    const legacyCp = CHECKPOINTS.find(c => {
+      const oldFormat = `CYCLEOPS-${c.qrKey.toUpperCase()}`;
+      return oldFormat === u || c.qrKey.toUpperCase() === u || c.id.toUpperCase() === u;
+    });
+
     if (legacyCp) {
       if (!cyclist) { showToast("Please log in first","error"); setView("login"); return; }
       setActiveCP(legacyCp.id);
       setView("cpCheckin");
       return;
     }
+
     if (u === "CYCLEOPS-ADMIN") { setView("adminAuth"); return; }
 
-    showToast("Unknown QR code","error");
+    showToast("Unknown QR code. Make sure you're scanning a valid CycleOps checkpoint code.", "error");
   };
 
   // ── CP Checkin ──
