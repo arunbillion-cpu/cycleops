@@ -2114,7 +2114,7 @@ function QRCodesView({ setView }) {
       <PageHeader icon="⬛" title="QR CODES" sub="Real scannable codes for mobile admin use" />
       <div style={{...CARD,marginBottom:16,background:"rgba(255,85,85,0.05)",borderColor:"rgba(255,85,85,0.2)"}}>
         <div style={{fontFamily:"monospace",fontSize:11,color:"#ff5555",marginBottom:4}}>🔒 ADMIN ONLY</div>
-        <div style={{fontSize:12,color:"#888"}}>Tap any code below for a large version. Participant can scan with <strong>any phone camera</strong> (opens the app + auto check-in after login) or the in-app scanner.</div>
+        <div style={{fontSize:12,color:"#888"}}>Tap any code below for a large version. Participants can scan with their normal phone camera (opens the app) or use the in-app scanner.</div>
       </div>
 
       {!qrLoaded && (
@@ -2202,7 +2202,7 @@ function QRCodesView({ setView }) {
             }}>
               <div style={{color: "#00ff88", fontWeight: "bold", marginBottom: 2}}>PARTICIPANT INSTRUCTIONS</div>
               <div style={{color: "#ddd"}}>
-                Open CycleOps app → tap <strong>SCAN QR</strong> at bottom → point camera at this screen
+                Point your phone camera at this screen (or open the app → SCAN QR)
               </div>
             </div>
 
@@ -2244,8 +2244,8 @@ function QRCodesView({ setView }) {
               {expandedQR.value}
             </div>
 
-            <div style={{fontSize: 10, color: "#ff5555", marginBottom: 8, fontWeight: 500}}>
-              ⚠ Use the in-app SCAN button — your phone's camera app will only search the code
+            <div style={{fontSize: 10, color: "#888", marginBottom: 8}}>
+              Works best with the in-app scanner. Native camera may open the browser.
             </div>
 
             <button 
@@ -2895,8 +2895,14 @@ function QRScanner({ onScan, onClose }) {
           });
 
           if (code && code.data) {
-            const val = code.data.toUpperCase().trim();
-            if (val.startsWith("CYCLEOPS-")) {
+            const val = code.data.trim();
+            const upperVal = val.toUpperCase();
+
+            // Support both old CYCLEOPS- codes and new URL-based QRs
+            const isLegacyCode = upperVal.startsWith("CYCLEOPS-");
+            const isOurUrl = val.includes("cycleops.vercel.app") || val.includes("?action=");
+
+            if (isLegacyCode || isOurUrl) {
               setScanStatus("Code detected!");
               onScan(val);
               return; // stop loop after successful scan
