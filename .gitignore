@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Organization logo - kept local only, not committed to GitHub
+public/logo.png
+Black Charger.png

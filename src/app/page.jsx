@@ -961,7 +961,9 @@ export default function CycleOps() {
         <img 
           src="/logo.png" 
           alt="Logo" 
-          style={{ height: 64, width: "auto", marginBottom: 16, objectFit: "contain" }} 
+          style={{ height: 64, width: "auto", marginBottom: 16, objectFit: "contain", display: 'none' }}
+          onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
         <div style={{fontFamily:"monospace", fontSize:24, marginBottom:12}}>CYCLEOPS</div>
         <div style={{color:"#00ff88"}}>Loading event data...</div>
@@ -983,7 +985,9 @@ export default function CycleOps() {
           <img 
             src="/logo.png" 
             alt="Logo" 
-            style={{ height: 26, width: "auto", marginRight: 8, objectFit: "contain" }} 
+            style={{ height: 26, width: "auto", marginRight: 8, objectFit: "contain", display: 'none' }}
+            onLoad={(e) => { e.currentTarget.style.display = 'inline'; }}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
           <span style={{color:"#fff",fontFamily:"monospace",fontSize:17,fontWeight:"bold",letterSpacing:3}}>CYCLEOPS</span>
         </button>
