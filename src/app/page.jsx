@@ -968,9 +968,10 @@ export default function CycleOps() {
               objectFit: "contain", 
               display: 'none', 
               background: 'transparent', 
-              animation: 'spinY 3.2s linear infinite',
+              animation: 'spinY 2.8s linear infinite',
               transformStyle: 'preserve-3d',
-              backfaceVisibility: 'hidden'
+              backfaceVisibility: 'hidden',
+              filter: 'drop-shadow(0 0 7px rgba(0, 255, 136, 0.28))'
             }}
             onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
@@ -1003,9 +1004,10 @@ export default function CycleOps() {
                 objectFit: "contain", 
                 display: 'none', 
                 background: 'transparent', 
-                animation: 'spinY 4s linear infinite',
+                animation: 'spinY 3.8s linear infinite',
                 transformStyle: 'preserve-3d',
-                backfaceVisibility: 'hidden'
+                backfaceVisibility: 'hidden',
+                filter: 'drop-shadow(0 0 5px rgba(0, 255, 136, 0.22))'
               }}
               onLoad={(e) => { e.currentTarget.style.display = 'inline'; }}
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
@@ -3068,8 +3070,14 @@ const CSS=`
   .fadeUp{animation:fadeUp 0.3s ease;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
   @keyframes spinY {
-    from { transform: rotateY(0deg); }
-    to { transform: rotateY(360deg); }
+    0%   { transform: rotateY(0deg)   scale(1); }
+    22%  { transform: rotateY(80deg)  scale(1); }
+    28%  { transform: rotateY(100deg) scale(1.12); }
+    47%  { transform: rotateY(172deg) scale(1); }
+    53%  { transform: rotateY(188deg) scale(1); }
+    72%  { transform: rotateY(260deg) scale(1.12); }
+    78%  { transform: rotateY(280deg) scale(1); }
+    100% { transform: rotateY(360deg) scale(1); }
   }
   select option{background:#0d0d0d;color:#fff;}
   details>summary{list-style:none;}
