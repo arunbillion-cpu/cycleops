@@ -40,7 +40,7 @@ const FINISH_QUESTIONNAIRE_QUESTIONS = [
 //
 // CONFIG (see .env.local.example)
 import { useState, useEffect, useRef, useCallback } from "react";
-import { supabase, safeInsert, safeUpsert } from "../../lib/supabase/client";
+import { supabase, safeInsert, safeUpsert } from "../lib/supabase/client";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
