@@ -961,7 +961,7 @@ export default function CycleOps() {
         <img 
           src="/logo.png" 
           alt="Logo" 
-          style={{ height: 64, width: "auto", marginBottom: 16, objectFit: "contain", display: 'none', background: 'transparent' }}
+          style={{ height: 64, width: "auto", marginBottom: 16, objectFit: "contain", display: 'none', background: 'transparent', animation: 'spin 12s linear infinite' }}
           onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
@@ -985,7 +985,7 @@ export default function CycleOps() {
           <img 
             src="/logo.png" 
             alt="Logo" 
-            style={{ height: 26, width: "auto", marginRight: 8, objectFit: "contain", display: 'none', background: 'transparent' }}
+            style={{ height: 26, width: "auto", marginRight: 8, objectFit: "contain", display: 'none', background: 'transparent', animation: 'spin 14s linear infinite' }}
             onLoad={(e) => { e.currentTarget.style.display = 'inline'; }}
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
@@ -3045,6 +3045,7 @@ const CSS=`
   ::-webkit-scrollbar-thumb{background:#1a1a1a;}
   .fadeUp{animation:fadeUp 0.3s ease;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
   select option{background:#0d0d0d;color:#fff;}
   details>summary{list-style:none;}
   details>summary::-webkit-details-marker{display:none;}
