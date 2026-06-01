@@ -741,6 +741,7 @@ export default function CycleOps() {
       const action = params.get("action");
 
       if (action === "register") {
+        showToast("Registration QR detected!");
         setView("register");
         return;
       }
@@ -748,7 +749,8 @@ export default function CycleOps() {
         const cpParam = params.get("cp");
         const cp = CHECKPOINTS.find(c => c.qrKey === cpParam || c.id === cpParam);
         if (cp) {
-          if (!cyclist) { showToast("Please log in first","error"); setView("login"); return; }
+          if (!cyclist) { showToast("Check-in QR detected! Please log in first.", "error"); setView("login"); return; }
+          showToast(`Check-in QR detected for ${cp.name}`);
           setActiveCP(cp.id);
           setView("cpCheckin");
           return;
@@ -2898,9 +2900,16 @@ function QRScanner({ onScan, onClose }) {
             const val = code.data.trim();
             const upperVal = val.toUpperCase();
 
-            // Support both old CYCLEOPS- codes and new URL-based QRs
+            // === More reliable detection for both legacy and URL-based QRs ===
             const isLegacyCode = upperVal.startsWith("CYCLEOPS-");
-            const isOurUrl = val.includes("cycleops.vercel.app") || val.includes("?action=");
+
+            // Stronger URL detection for our app
+            const looksLikeUrl = val.includes("://") || val.includes("cycleops");
+            const hasOurAction = upperVal.includes("ACTION=REGISTER") || 
+                                 upperVal.includes("ACTION=CHECKIN") ||
+                                 upperVal.includes("?ACTION=");
+
+            const isOurUrl = looksLikeUrl && hasOurAction;
 
             if (isLegacyCode || isOurUrl) {
               setScanStatus("Code detected!");
