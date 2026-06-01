@@ -40,6 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Organization logo - kept local only, not committed to GitHub
-public/logo.png
+# Organization logo source files (keep only the deployed copy in public/)
 Black Charger.png
+New Project Logo.png
