@@ -961,7 +961,7 @@ export default function CycleOps() {
         <img 
           src="/logo.png" 
           alt="Logo" 
-          style={{ height: 64, width: "auto", marginBottom: 16, objectFit: "contain", display: 'none' }}
+          style={{ height: 64, width: "auto", marginBottom: 16, objectFit: "contain", display: 'none', background: 'transparent' }}
           onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
@@ -985,7 +985,7 @@ export default function CycleOps() {
           <img 
             src="/logo.png" 
             alt="Logo" 
-            style={{ height: 26, width: "auto", marginRight: 8, objectFit: "contain", display: 'none' }}
+            style={{ height: 26, width: "auto", marginRight: 8, objectFit: "contain", display: 'none', background: 'transparent' }}
             onLoad={(e) => { e.currentTarget.style.display = 'inline'; }}
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
