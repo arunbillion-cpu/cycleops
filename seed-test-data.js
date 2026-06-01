@@ -9,6 +9,7 @@
 
 require('dotenv').config({ path: '.env.local' });
 const { createClient } = require('@supabase/supabase-js');
+const bcrypt = require('bcryptjs');
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -46,17 +47,19 @@ async function seed() {
 
   console.log("👥 Creating 10 test participants...");
 
-  const participants = testUsers.map((user, index) => ({
-    id: `test-user-${index + 1}`,
-    name: user.name,
-    age: 22 + (index % 8),
-    phone: user.phone,
-    emergency: "987650000" + index,
-    medical: true,
-    team_id: user.team,
-    password: "test123",
-    registered_at: new Date(Date.now() - (10 - index) * 3600000).toISOString(),
-  }));
+  const participants = await Promise.all(
+    testUsers.map(async (user, index) => ({
+      id: `test-user-${index + 1}`,
+      name: user.name,
+      age: 22 + (index % 8),
+      phone: user.phone,
+      emergency: "987650000" + index,
+      medical: true,
+      team_id: user.team,
+      password: await bcrypt.hash("test123", 10), // Hashed for security
+      registered_at: new Date(Date.now() - (10 - index) * 3600000).toISOString(),
+    }))
+  );
 
   const { error: pError } = await supabase.from("participants").insert(participants);
   if (pError) console.error("Participant insert error:", pError);

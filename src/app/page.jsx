@@ -41,6 +41,7 @@ const FINISH_QUESTIONNAIRE_QUESTIONS = [
 // CONFIG (see .env.local.example)
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase, safeInsert, safeUpsert } from "../../lib/supabase/client";
+import bcrypt from "bcryptjs";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -66,6 +67,18 @@ const CHECKPOINTS = [
   { id:"cp2",   name:"CP 2",       label:"Eye for Detail (30 marks)",      km:22, icon:"👁️", qrKey:"cp2"   },
   { id:"cp3",   name:"CP 3",       label:"Hydration & Refreshments",       km:31, icon:"💧", qrKey:"cp3"   },
   { id:"finish",name:"FINISH (FP)",label:"Finish + Jerrican + Questionnaire", km:40, icon:"🏆", qrKey:"finish" },
+];
+
+/** 
+ * Centralized list of all tables that hold event data.
+ * Use this in cleanup scripts, admin tools, and data loading to avoid missing tables.
+ */
+export const KNOWN_TABLES = [
+  "participants",
+  "checkins",
+  "game_answers",
+  "jerrican_carry",
+  "manual_scores",
 ];
 
 // ══════════════════════════════════════
@@ -297,6 +310,18 @@ async function resetAllSupabaseData(showToast) {
 // Check-ins rely solely on physical presence at the QR code location.
 // The QR codes are only shown to the full team at the actual CP.
 // ─────────────────────────────────────────────────────────────────
+
+// ══════════════════════════════════════
+// PASSWORD SECURITY HELPERS
+// ══════════════════════════════════════
+const hashPassword = async (plainPassword) => {
+  // Cost factor 10 is a good balance of security vs speed for this use case
+  return await bcrypt.hash(plainPassword, 10);
+};
+
+const comparePassword = async (plainPassword, hashedPassword) => {
+  return await bcrypt.compare(plainPassword, hashedPassword);
+};
 
 // ══════════════════════════════════════
 // QR CODE COMPONENT
@@ -852,9 +877,12 @@ export default function CycleOps() {
     const tempIdx = sorted.findIndex((p, i) => i === sorted.length - 1);
     const assignedTeam = teamIds[tempIdx % 4];
 
+    const hashedPassword = await hashPassword(regForm.password);
+
     const newP = {
       id,
       ...regForm,
+      password: hashedPassword, // Store hashed password only
       age: parseInt(regForm.age),
       teamId: assignedTeam,
       registeredAt: new Date().toISOString(),
@@ -901,15 +929,21 @@ export default function CycleOps() {
   };
 
   // ── Login (Name + Password) — Access Code removed ──
-  const handleLogin = (name, password) => {
+  const handleLogin = async (name, password) => {
     const fullName = (name || "").trim().toLowerCase();
     const pass = (password || "").trim();
 
     const found = participants.find(
-      p => (p.name || "").toLowerCase() === fullName && p.password === pass
+      p => (p.name || "").toLowerCase() === fullName
     );
 
     if (!found) {
+      showToast("Invalid Name or Password. Please check your details.", "error");
+      return;
+    }
+
+    const passwordMatch = await comparePassword(pass, found.password);
+    if (!passwordMatch) {
       showToast("Invalid Name or Password. Please check your details.", "error");
       return;
     }
