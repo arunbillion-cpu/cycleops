@@ -958,13 +958,24 @@ export default function CycleOps() {
   if (isLoadingData) {
     return (
       <div style={{ minHeight:"100vh",background:"#060606",color:"#fff",maxWidth:480,margin:"0 auto", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column" }}>
-        <img 
-          src="/logo.png" 
-          alt="Logo" 
-          style={{ height: 64, width: "auto", marginBottom: 16, objectFit: "contain", display: 'none', background: 'transparent', animation: 'spin 12s linear infinite' }}
-          onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
-          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-        />
+        <div style={{ perspective: '800px' }}>
+          <img 
+            src="/logo.png" 
+            alt="Logo" 
+            style={{ 
+              height: 64, 
+              width: "auto", 
+              objectFit: "contain", 
+              display: 'none', 
+              background: 'transparent', 
+              animation: 'spinY 5s linear infinite',
+              transformStyle: 'preserve-3d',
+              backfaceVisibility: 'hidden'
+            }}
+            onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+        </div>
         <div style={{fontFamily:"monospace", fontSize:24, marginBottom:12}}>CYCLEOPS</div>
         <div style={{color:"#00ff88"}}>Loading event data...</div>
         <div style={{fontSize:12, color:"#555", marginTop:8}}>Connecting to database</div>
@@ -982,13 +993,24 @@ export default function CycleOps() {
       {/* NAV */}
       <nav style={NAV}>
         <button onClick={()=>setView(cyclist?"dashboard":"home")} style={NAV_BRAND}>
-          <img 
-            src="/logo.png" 
-            alt="Logo" 
-            style={{ height: 26, width: "auto", marginRight: 8, objectFit: "contain", display: 'none', background: 'transparent', animation: 'spin 14s linear infinite' }}
-            onLoad={(e) => { e.currentTarget.style.display = 'inline'; }}
-            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-          />
+          <div style={{ perspective: '600px', display: 'inline-block' }}>
+            <img 
+              src="/logo.png" 
+              alt="Logo" 
+              style={{ 
+                height: 26, 
+                width: "auto", 
+                objectFit: "contain", 
+                display: 'none', 
+                background: 'transparent', 
+                animation: 'spinY 6s linear infinite',
+                transformStyle: 'preserve-3d',
+                backfaceVisibility: 'hidden'
+              }}
+              onLoad={(e) => { e.currentTarget.style.display = 'inline'; }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
+          </div>
           <span style={{color:"#fff",fontFamily:"monospace",fontSize:17,fontWeight:"bold",letterSpacing:3}}>CYCLEOPS</span>
         </button>
         <div style={{display:"flex",gap:6}}>
@@ -3045,7 +3067,10 @@ const CSS=`
   ::-webkit-scrollbar-thumb{background:#1a1a1a;}
   .fadeUp{animation:fadeUp 0.3s ease;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
-  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+  @keyframes spinY {
+    from { transform: rotateY(0deg); }
+    to { transform: rotateY(360deg); }
+  }
   select option{background:#0d0d0d;color:#fff;}
   details>summary{list-style:none;}
   details>summary::-webkit-details-marker{display:none;}
