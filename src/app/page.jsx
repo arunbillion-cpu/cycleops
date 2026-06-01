@@ -41,7 +41,6 @@ const FINISH_QUESTIONNAIRE_QUESTIONS = [
 // CONFIG (see .env.local.example)
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase, safeInsert, safeUpsert } from "../../lib/supabase/client";
-import bcrypt from "bcryptjs";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -310,18 +309,6 @@ async function resetAllSupabaseData(showToast) {
 // Check-ins rely solely on physical presence at the QR code location.
 // The QR codes are only shown to the full team at the actual CP.
 // ─────────────────────────────────────────────────────────────────
-
-// ══════════════════════════════════════
-// PASSWORD SECURITY HELPERS
-// ══════════════════════════════════════
-const hashPassword = async (plainPassword) => {
-  // Cost factor 10 is a good balance of security vs speed for this use case
-  return await bcrypt.hash(plainPassword, 10);
-};
-
-const comparePassword = async (plainPassword, hashedPassword) => {
-  return await bcrypt.compare(plainPassword, hashedPassword);
-};
 
 // ══════════════════════════════════════
 // QR CODE COMPONENT
@@ -932,25 +919,25 @@ export default function CycleOps() {
 
   // ── Login (Name + Password) — Access Code removed ──
   const handleLogin = async (name, password) => {
-    const fullName = (name || "").trim().toLowerCase();
-    const pass = (password || "").trim();
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, password }),
+      });
 
-    const found = participants.find(
-      p => (p.name || "").toLowerCase() === fullName
-    );
+      const data = await response.json();
 
-    if (!found) {
-      showToast("Invalid Name or Password. Please check your details.", "error");
-      return;
+      if (!response.ok || !data.success) {
+        showToast(data.error || "Invalid Name or Password. Please check your details.", "error");
+        return;
+      }
+
+      setCyclist(data.user);
+    } catch (err) {
+      console.error("Login error:", err);
+      showToast("Login failed. Please try again.", "error");
     }
-
-    const passwordMatch = await comparePassword(pass, found.password);
-    if (!passwordMatch) {
-      showToast("Invalid Name or Password. Please check your details.", "error");
-      return;
-    }
-
-    setCyclist(found);
 
     // Consume pending QR action (from native camera or in-app URL scan)
     if (pendingAction?.type === "checkin" && pendingAction.cpId) {
