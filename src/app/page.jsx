@@ -968,7 +968,7 @@ export default function CycleOps() {
               objectFit: "contain", 
               display: 'none', 
               background: 'transparent', 
-              animation: 'spinY 5s linear infinite',
+              animation: 'spinY 3.2s linear infinite',
               transformStyle: 'preserve-3d',
               backfaceVisibility: 'hidden'
             }}
@@ -1003,7 +1003,7 @@ export default function CycleOps() {
                 objectFit: "contain", 
                 display: 'none', 
                 background: 'transparent', 
-                animation: 'spinY 6s linear infinite',
+                animation: 'spinY 4s linear infinite',
                 transformStyle: 'preserve-3d',
                 backfaceVisibility: 'hidden'
               }}
