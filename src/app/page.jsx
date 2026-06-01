@@ -970,12 +970,18 @@ export default function CycleOps() {
     const score = correct*pointsEach;
     const entry = { id:genId(), cyclistId:cyclist.id, cyclistName:cyclist.name, teamId:cyclist.teamId, game, answers, score, correct, total:questions.length, submittedAt:new Date().toISOString() };
     setGameAnswers(prev=>[...prev.filter(a=>!(a.cyclistId===cyclist.id&&a.game===game)),entry]);
-    // Live write to Supabase using official client (with retry)
+    // Live write via secure server-side API route
     if (SUPABASE_URL && SUPABASE_KEY) {
       const dbPayload = toGameAnswerPayload(entry);
-      const { error } = await safeInsert("game_answers", dbPayload);
-      if (error) {
-        showDBError("game answer submission", error);
+      const response = await fetch('/api/submit-game-answers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dbPayload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        showDBError("game answer submission", errorData);
       }
     }
     return { score, correct };
@@ -1361,12 +1367,18 @@ function EyeForDetailView({ cyclist, gameAnswers, setGameAnswers, setView, showT
     setScore(finalScore);
     setSubmitted(true);
 
-    // Live write to Supabase using official client (with retry)
+    // Live write via secure server-side API route
     if (SUPABASE_URL && SUPABASE_KEY) {
       const dbPayload = toGameAnswerPayload(entry);
-      const { error } = await safeInsert("game_answers", dbPayload);
-      if (error) {
-        showDBError("Eye for Detail submission", error);
+      const response = await fetch('/api/submit-game-answers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dbPayload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        showDBError("Eye for Detail submission", errorData);
       } else {
         showToast(`Submitted! Your team scored ${finalScore} / 30 marks`);
       }
@@ -1510,9 +1522,15 @@ function FinishQuestionnaireView({ cyclist, setView, showToast, gameAnswers, set
 
     if (SUPABASE_URL && SUPABASE_KEY) {
       const dbPayload = toGameAnswerPayload(entry);
-      const { error } = await safeInsert("game_answers", dbPayload);
-      if (error) {
-        showDBError("finish questionnaire submission", error);
+      const response = await fetch('/api/submit-game-answers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dbPayload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        showDBError("finish questionnaire submission", errorData);
       } else {
         showToast("Answers submitted successfully. This submission is final.");
       }
