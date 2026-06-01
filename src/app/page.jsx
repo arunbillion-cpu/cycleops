@@ -411,9 +411,16 @@ export default function CycleOps() {
       updated_at: new Date().toISOString(),
     };
 
-    const { error } = await safeUpsert("manual_scores", payload);
-    if (error) {
-      console.error("Manual scores DB save failed:", error);
+    // Write via secure server-side API route
+    const response = await fetch('/api/save-manual-scores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("Manual scores DB save failed:", errorData);
       if (showToastFn) {
         showToastFn("Failed to save manual scores. Changes kept locally.", "error");
       }
@@ -435,9 +442,16 @@ export default function CycleOps() {
       updated_at: new Date().toISOString()
     };
 
-    const { error } = await safeUpsert("jerrican_carry", payload);
-    if (error) {
-      console.error("Jerrican DB save failed:", error);
+    // Write via secure server-side API route
+    const response = await fetch('/api/save-jerrican', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("Jerrican DB save failed:", errorData);
       if (showToastFn) showToastFn("Failed to save Jerrican status. Changes kept locally.", "error");
     } else {
       setLastDbSync(new Date());
