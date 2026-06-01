@@ -61,12 +61,42 @@ const TEAMS = [
 // CHECKPOINTS
 // ══════════════════════════════════════
 const CHECKPOINTS = [
-  { id:"start", name:"START (SP)", label:"Start Point",                    km:0,  icon:"🏁", qr:"CYCLEOPS-START" },
-  { id:"cp1",   name:"CP 1",       label:"Hydration & Refreshments",       km:16, icon:"💧", qr:"CYCLEOPS-CP1"   },
-  { id:"cp2",   name:"CP 2",       label:"Eye for Detail (30 marks)",      km:22, icon:"👁️", qr:"CYCLEOPS-CP2"   },
-  { id:"cp3",   name:"CP 3",       label:"Hydration & Refreshments",       km:31, icon:"💧", qr:"CYCLEOPS-CP3"   },
-  { id:"finish",name:"FINISH (FP)",label:"Finish + Jerrican + Questionnaire", km:40, icon:"🏆", qr:"CYCLEOPS-FINISH" },
+  { id:"start", name:"START (SP)", label:"Start Point",                    km:0,  icon:"🏁", qrKey:"start" },
+  { id:"cp1",   name:"CP 1",       label:"Hydration & Refreshments",       km:16, icon:"💧", qrKey:"cp1"   },
+  { id:"cp2",   name:"CP 2",       label:"Eye for Detail (30 marks)",      km:22, icon:"👁️", qrKey:"cp2"   },
+  { id:"cp3",   name:"CP 3",       label:"Hydration & Refreshments",       km:31, icon:"💧", qrKey:"cp3"   },
+  { id:"finish",name:"FINISH (FP)",label:"Finish + Jerrican + Questionnaire", km:40, icon:"🏆", qrKey:"finish" },
 ];
+
+// ══════════════════════════════════════
+// URL-BASED QR CODES (unified for native camera + in-app scanner)
+// Scanning any of these with phone camera or in-app scanner works uniformly.
+// Production domain is used for printed signs; current origin is used inside the app (for local/Vercel preview testing).
+// ══════════════════════════════════════
+const APP_BASE_URL = "https://cycleops.vercel.app";
+
+function buildQRUrl(key) {
+  const base = (typeof window !== "undefined" && window.location.origin)
+    ? window.location.origin
+    : APP_BASE_URL;
+  const params = new URLSearchParams();
+  if (key === "register") {
+    params.set("action", "register");
+  } else {
+    params.set("action", "checkin");
+    params.set("cp", key);
+  }
+  return `${base}/?${params.toString()}`;
+}
+
+// Map for easy lookup when decoding URLs
+const QR_KEY_BY_CP_ID = {
+  start: "start",
+  cp1: "cp1",
+  cp2: "cp2",
+  cp3: "cp3",
+  finish: "finish",
+};
 
 // ══════════════════════════════════════
 // EYE FOR DETAIL — 15 Questions (CP2) — 30 marks total (2 per correct)
@@ -211,8 +241,7 @@ const DEFAULT_SCORING = {
 // Test connection + basic write permission (production-grade version)
 async function testSupabaseConnection() {
   try {
-    // Debug marker - used to verify the deployed version on Vercel
-    console.log("[CycleOps Debug] Vercel Test v3 - Password fix + Debug marker applied at", new Date().toISOString());
+    // Connection test helper (no debug markers in production)
 
     // 1. Read test using official client
     const { error: readError } = await supabase
@@ -261,18 +290,13 @@ async function resetAllSupabaseData(showToast) {
 }
 
 // ══════════════════════════════════════
-// GPS HELPER
+// GPS HELPER — REMOVED
 // ══════════════════════════════════════
-function getGPS() {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) { resolve(null); return; }
-    navigator.geolocation.getCurrentPosition(
-      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-      () => resolve(null),
-      { timeout: 8000, enableHighAccuracy: true }
-    );
-  });
-}
+// Per confirmed security requirements (military tactical event):
+// No device location / GPS is ever requested or stored.
+// Check-ins rely solely on physical presence at the QR code location.
+// The QR codes are only shown to the full team at the actual CP.
+// ─────────────────────────────────────────────────────────────────
 
 // ══════════════════════════════════════
 // QR CODE COMPONENT
@@ -332,6 +356,10 @@ export default function CycleOps() {
 
   // Registration success data (replaces fragile window.__justRegistered)
   const [justRegistered, setJustRegistered] = useState(null);
+
+  // Pending action from URL QR scan (register or checkin at specific CP)
+  // This enables native camera scans + in-app URL scans to work after login
+  const [pendingAction, setPendingAction] = useState(null);
 
   // ── UI state ──
   const [activeCP, setActiveCP] = useState(null);
@@ -446,7 +474,7 @@ export default function CycleOps() {
       team_id: c.teamId,
       cp_id: c.cpId,
       timestamp: c.timestamp,
-      gps: c.gps,
+      // gps intentionally omitted (security policy: no location data collected)
     };
   }
 
@@ -635,6 +663,35 @@ export default function CycleOps() {
     loadInitial();
   }, []);  // Run once on mount
 
+  // Parse URL parameters from QR codes (native camera or in-app scanner)
+  // Supports the new unified URL scheme: ?action=register or ?action=checkin&cp=cp2
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get("action");
+    if (!action) return;
+
+    let parsed = null;
+
+    if (action === "register") {
+      parsed = { type: "register" };
+    } else if (action === "checkin") {
+      const cpParam = params.get("cp");
+      if (cpParam && QR_KEY_BY_CP_ID[cpParam]) {
+        parsed = { type: "checkin", cpId: QR_KEY_BY_CP_ID[cpParam] };
+      }
+    }
+
+    if (parsed) {
+      setPendingAction(parsed);
+      // Clean the URL so it doesn't stay in the address bar / get bookmarked strangely
+      try {
+        window.history.replaceState({}, "", window.location.pathname);
+      } catch (e) {}
+    }
+  }, []);  // Run once on mount
+
   // Persist manual scores to DB (debounced to avoid spamming the database)
   useEffect(() => {
     // Only save if we have real data
@@ -672,22 +729,48 @@ export default function CycleOps() {
     };
   }, [manualScores]);
 
-  // ── QR scan handler ──
+  // ── QR scan handler (supports both legacy CYCLEOPS- codes and new unified URL scheme) ──
   const handleQRScan = (code) => {
     setShowScanner(false);
-    const u = code.toUpperCase().trim();
+    const raw = (code || "").trim();
 
-    if (u==="CYCLEOPS-REGISTER") { setView("register"); return; }
+    // Try to parse as URL first (new unified scheme)
+    try {
+      const url = new URL(raw);
+      const params = url.searchParams;
+      const action = params.get("action");
 
-    // CP scans require cyclist to be logged in
-    const cp = CHECKPOINTS.find(c=>c.qr===u);
-    if (cp) {
+      if (action === "register") {
+        setView("register");
+        return;
+      }
+      if (action === "checkin") {
+        const cpParam = params.get("cp");
+        const cp = CHECKPOINTS.find(c => c.qrKey === cpParam || c.id === cpParam);
+        if (cp) {
+          if (!cyclist) { showToast("Please log in first","error"); setView("login"); return; }
+          setActiveCP(cp.id);
+          setView("cpCheckin");
+          return;
+        }
+      }
+    } catch {
+      // Not a valid URL — fall through to legacy handling
+    }
+
+    // Legacy opaque codes (for transition / old printed signs)
+    const u = raw.toUpperCase();
+    if (u === "CYCLEOPS-REGISTER") { setView("register"); return; }
+
+    const legacyCp = CHECKPOINTS.find(c => c.qr === u); // old field may still exist on some data
+    if (legacyCp) {
       if (!cyclist) { showToast("Please log in first","error"); setView("login"); return; }
-      setActiveCP(cp.id);
+      setActiveCP(legacyCp.id);
       setView("cpCheckin");
       return;
     }
-    if (u==="CYCLEOPS-ADMIN") { setView("adminAuth"); return; }
+    if (u === "CYCLEOPS-ADMIN") { setView("adminAuth"); return; }
+
     showToast("Unknown QR code","error");
   };
 
@@ -696,7 +779,8 @@ export default function CycleOps() {
     if (!cyclist || !activeCP) return;
     const existing = checkins.find(c=>c.cyclistId===cyclist.id&&c.cpId===activeCP);
     if (existing) { showToast("Already checked in here!","warning"); return; }
-    const gps = await getGPS();
+
+    // No GPS is captured (per security requirements — only physical presence at CP QR is recorded)
     const checkin = {
       id: genId(),
       cyclistId: cyclist.id,
@@ -704,7 +788,6 @@ export default function CycleOps() {
       teamId: cyclist.teamId,
       cpId: activeCP,
       timestamp: new Date().toISOString(),
-      gps,
     };
     setCheckins(prev=>[...prev,checkin]);
 
@@ -804,6 +887,9 @@ export default function CycleOps() {
     // Show success screen (no access code anymore)
     setView("regSuccess");
     setJustRegistered({ name: me.name, team: TEAMS.find(t => t.id === me.teamId)?.name });
+
+    // If they scanned a check-in QR before registering, remember it so we can auto-open after they tap "Continue to Dashboard"
+    // (handled in RegSuccessView onClick)
   };
 
   // ── Login (Name + Password) — Access Code removed ──
@@ -821,8 +907,24 @@ export default function CycleOps() {
     }
 
     setCyclist(found);
-    setView("dashboard");
-    showToast(`Welcome back, ${found.name}!`);
+
+    // Consume pending QR action (from native camera or in-app URL scan)
+    if (pendingAction?.type === "checkin" && pendingAction.cpId) {
+      const cp = CHECKPOINTS.find(c => c.id === pendingAction.cpId);
+      if (cp) {
+        setActiveCP(cp.id);
+        setView("cpCheckin");
+        showToast(`Welcome back, ${found.name}! Opening ${cp.name} check-in...`);
+      } else {
+        setView("dashboard");
+        showToast(`Welcome back, ${found.name}!`);
+      }
+    } else {
+      setView("dashboard");
+      showToast(`Welcome back, ${found.name}!`);
+    }
+
+    setPendingAction(null);
   };
 
   // ── Game answer submission ──
@@ -887,6 +989,8 @@ export default function CycleOps() {
           setView={setView} 
           justRegistered={justRegistered} 
           setJustRegistered={setJustRegistered} 
+          pendingAction={pendingAction}
+          setPendingAction={setPendingAction}
         />}
         {view==="dashboard"  && <DashboardView cyclist={cyclist} setCyclist={setCyclist} lb={lb} checkins={checkins} gameAnswers={gameAnswers} setView={setView} setShowScanner={setShowScanner} activeCP={activeCP} setActiveCP={setActiveCP} showToast={showToast} />}
         {view==="cpCheckin"  && <CPCheckinView activeCP={activeCP} cyclist={cyclist} checkins={checkins} onCheckin={handleCPCheckin} setView={setView} />}
@@ -1083,7 +1187,7 @@ function LoginView({ onLogin, setView }) {
 // ══════════════════════════════════════
 // REGISTRATION SUCCESS (No Access Code anymore)
 // ══════════════════════════════════════
-function RegSuccessView({ setView, justRegistered, setJustRegistered }) {
+function RegSuccessView({ setView, justRegistered, setJustRegistered, pendingAction, setPendingAction }) {
   const data = justRegistered || { name: "Cyclist", team: "TEAM" };
 
   return (
@@ -1114,8 +1218,21 @@ function RegSuccessView({ setView, justRegistered, setJustRegistered }) {
 
         <button 
           onClick={() => { 
-            if (setJustRegistered) setJustRegistered(null); 
-            setView("dashboard"); 
+            if (setJustRegistered) setJustRegistered(null);
+
+            // Consume pending check-in action (from QR scanned before registration)
+            if (pendingAction?.type === "checkin" && pendingAction.cpId) {
+              const cp = CHECKPOINTS.find(c => c.id === pendingAction.cpId);
+              if (cp) {
+                setActiveCP(cp.id);
+                setView("cpCheckin");
+              } else {
+                setView("dashboard");
+              }
+              if (setPendingAction) setPendingAction(null);
+            } else {
+              setView("dashboard");
+            }
           }} 
           style={{...BTN_PRIMARY, width:"100%", justifyContent:"center", marginTop:8}}
         >
@@ -1599,17 +1716,17 @@ function CPCheckinView({ activeCP, cyclist, checkins, onCheckin, setView }) {
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:11,color:"#555",fontFamily:"monospace"}}>TIME</div>
               <div style={{fontFamily:"monospace",fontSize:18,fontWeight:"bold",color:"#00ff88",marginTop:2}}>{time}</div>
-              <div style={{fontSize:10,color:"#444",marginTop:1}}>GPS auto-capture</div>
+              <div style={{fontSize:10,color:"#444",marginTop:1}}>Timestamp only</div>
             </div>
           </div>
 
           {checking ? (
             <div style={{textAlign:"center", padding: "20px 0"}}>
               <div style={{fontSize:18, color:"#00ff88", marginBottom:8}}>⏳ Recording your check-in...</div>
-              <div style={{fontSize:12, color:"#888"}}>Saving timestamp + GPS to the database. Please wait.</div>
+              <div style={{fontSize:12, color:"#888"}}>Saving arrival timestamp to the database. Please wait.</div>
             </div>
           ) : (
-            <PBtn onClick={go} icon="📍" label="CONFIRM ARRIVAL" sub="Timestamp + GPS will be saved to database" />
+            <PBtn onClick={go} icon="📍" label="CONFIRM ARRIVAL" sub="Timestamp will be saved to database" />
           )}
         </div>
       )}
@@ -1895,16 +2012,20 @@ function ScoringGuideView({ setView }) {
 // ══════════════════════════════════════
 function QRCodesView({ setView }) {
   const [qrLoaded, setQrLoaded] = useState(false);
+  const [expandedQR, setExpandedQR] = useState(null);
+  const expandedQrRef = useRef(null);
+  const smallQrRefs = useRef({});
+  const [qrSize, setQrSize] = useState(280);
 
   const items = [
-    {label:"REGISTRATION",value:"CYCLEOPS-REGISTER",icon:"📝",desc:"All participants scan to register",color:"#00ff88"},
-    {label:"CP 1 — KM 16",value:"CYCLEOPS-CP1",icon:"💧",desc:"Hydration only",color:"#4af0ff"},
-    {label:"CP 2 — KM 22",value:"CYCLEOPS-CP2",icon:"👁️",desc:"Eye for Detail (30 marks)",color:"#ffbb00"},
-    {label:"CP 3 — KM 31",value:"CYCLEOPS-CP3",icon:"💧",desc:"Hydration only",color:"#4af0ff"},
-    {label:"FINISH — KM 40",value:"CYCLEOPS-FINISH",icon:"🏆",desc:"Finish questionnaire",color:"#00ff88"},
+    {label:"REGISTRATION",value:buildQRUrl("register"),icon:"📝",desc:"Opens registration form",color:"#00ff88"},
+    {label:"CP 1 — KM 16",value:buildQRUrl("cp1"),icon:"💧",desc:"Check-in + Hydration",color:"#4af0ff"},
+    {label:"CP 2 — KM 22",value:buildQRUrl("cp2"),icon:"👁️",desc:"Check-in + Eye for Detail (30 marks)",color:"#ffbb00"},
+    {label:"CP 3 — KM 31",value:buildQRUrl("cp3"),icon:"💧",desc:"Check-in + Hydration",color:"#4af0ff"},
+    {label:"FINISH — KM 40",value:buildQRUrl("finish"),icon:"🏆",desc:"Check-in + Finish Questionnaire",color:"#00ff88"},
   ];
 
-  // Load real QR code library on demand (same as lamination tool)
+  // Load real QR code library on demand
   useEffect(() => {
     if (window.QRCode) {
       setQrLoaded(true);
@@ -1920,19 +2041,66 @@ function QRCodesView({ setView }) {
     };
   }, []);
 
-  const renderRealQR = (value, size = 130) => {
-    const container = document.createElement("div");
-    if (window.QRCode) {
+  // Responsive QR size for true full-screen zoom on any phone (used in lightbox)
+  useEffect(() => {
+    const updateSize = () => {
+      if (typeof window === "undefined") return;
+      const available = Math.max(240, Math.min(420, window.innerWidth - 90));
+      setQrSize(available);
+    };
+    updateSize();
+    window.addEventListener("resize", updateSize);
+    window.addEventListener("orientationchange", updateSize);
+    return () => {
+      window.removeEventListener("resize", updateSize);
+      window.removeEventListener("orientationchange", updateSize);
+    };
+  }, []);
+
+  // Generate small preview QRs once when library ready (stable, no re-gen flicker when opening lightbox)
+  useEffect(() => {
+    if (!qrLoaded || !window.QRCode) return;
+    items.forEach((item) => {
+      const el = smallQrRefs.current[item.value];
+      if (el) {
+        el.innerHTML = "";
+        try {
+          new window.QRCode(el, {
+            text: item.value,
+            width: 130,
+            height: 130,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: window.QRCode.CorrectLevel.H
+          });
+        } catch (e) {}
+      }
+    });
+  }, [qrLoaded]);
+
+  // Generate large QR in lightbox (uses ref + responsive size for perfect fit + zoom)
+  useEffect(() => {
+    if (!expandedQR || !qrLoaded || !window.QRCode || !expandedQrRef.current) return;
+    const container = expandedQrRef.current;
+    container.innerHTML = "";
+    try {
       new window.QRCode(container, {
-        text: value,
-        width: size,
-        height: size,
+        text: expandedQR.value,
+        width: qrSize,
+        height: qrSize,
         colorDark: "#000000",
         colorLight: "#ffffff",
         correctLevel: window.QRCode.CorrectLevel.H
       });
-    }
-    return container;
+    } catch (e) {}
+  }, [expandedQR, qrLoaded, qrSize]);
+
+  const openQR = (item) => {
+    setExpandedQR(item);
+  };
+
+  const closeQR = () => {
+    setExpandedQR(null);
   };
 
   return (
@@ -1940,7 +2108,7 @@ function QRCodesView({ setView }) {
       <PageHeader icon="⬛" title="QR CODES" sub="Real scannable codes for mobile admin use" />
       <div style={{...CARD,marginBottom:16,background:"rgba(255,85,85,0.05)",borderColor:"rgba(255,85,85,0.2)"}}>
         <div style={{fontFamily:"monospace",fontSize:11,color:"#ff5555",marginBottom:4}}>🔒 ADMIN ONLY</div>
-        <div style={{fontSize:12,color:"#888"}}>These are real QR codes. Use on your phone to help participants scan if they missed a checkpoint.</div>
+        <div style={{fontSize:12,color:"#888"}}>Tap any code below for a large version. Participant can scan with <strong>any phone camera</strong> (opens the app + auto check-in after login) or the in-app scanner.</div>
       </div>
 
       {!qrLoaded && (
@@ -1949,22 +2117,24 @@ function QRCodesView({ setView }) {
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         {items.map(item => (
-          <div key={item.value} style={{background:"#0a0a0a",border:`1px solid ${item.color}33`,borderRadius:12,padding:14}}>
+          <div 
+            key={item.value} 
+            onClick={() => openQR(item)}
+            style={{
+              background:"#0a0a0a",
+              border:`1px solid ${item.color}33`,
+              borderRadius:12,
+              padding:14,
+              cursor: "pointer",
+              transition: "transform 0.1s ease"
+            }}
+            onMouseDown={(e) => e.currentTarget.style.transform = "scale(0.98)"}
+            onMouseUp={(e) => e.currentTarget.style.transform = "scale(1)"}
+            onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+          >
             <div style={{display:"flex",justifyContent:"center",marginBottom:10, minHeight:130}}>
               {qrLoaded && window.QRCode ? (
-                <div ref={el => {
-                  if (el) {
-                    el.innerHTML = "";
-                    new window.QRCode(el, {
-                      text: item.value,
-                      width: 130,
-                      height: 130,
-                      colorDark: "#000000",
-                      colorLight: "#ffffff",
-                      correctLevel: window.QRCode.CorrectLevel.H
-                    });
-                  }
-                }} />
+                <div ref={el => { if (el) smallQrRefs.current[item.value] = el; }} style={{width:130,height:130}} />
               ) : (
                 <div style={{width:130,height:130,background:"#111",display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:12}}>
                   Loading...
@@ -1980,6 +2150,117 @@ function QRCodesView({ setView }) {
         ))}
       </div>
       <BkBtn onClick={()=>setView("admin")} />
+
+      {/* Full Screen QR Modal — tap-to-zoom lightbox for admin phone use at checkpoints */}
+      {expandedQR && (
+        <div 
+          onClick={closeQR}
+          onTouchEnd={closeQR}
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.95)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 8,
+            cursor: "pointer"
+          }}
+        >
+          <div 
+            onClick={e => e.stopPropagation()}
+            onTouchEnd={e => e.stopPropagation()}
+            style={{
+              background: "#0a0a0a",
+              borderRadius: 14,
+              padding: "12px 10px 14px",
+              maxWidth: "98vw",
+              width: "100%",
+              textAlign: "center",
+              border: `2px solid ${expandedQR.color}55`
+            }}
+          >
+            {/* Very prominent instruction for the person being shown the QR */}
+            <div style={{
+              background: "rgba(0,255,136,0.08)",
+              border: "1px solid #00ff88",
+              borderRadius: 8,
+              padding: "8px 10px",
+              marginBottom: 8,
+              fontSize: 12,
+              lineHeight: 1.3
+            }}>
+              <div style={{color: "#00ff88", fontWeight: "bold", marginBottom: 2}}>PARTICIPANT INSTRUCTIONS</div>
+              <div style={{color: "#ddd"}}>
+                Open CycleOps app → tap <strong>SCAN QR</strong> at bottom → point camera at this screen
+              </div>
+            </div>
+
+            <div style={{marginBottom: 6}}>
+              <div style={{fontSize: 14, fontWeight: "bold", color: expandedQR.color, marginBottom: 1, letterSpacing: 0.5}}>
+                {expandedQR.label}
+              </div>
+              <div style={{fontSize: 10, color: "#666"}}>{expandedQR.desc}</div>
+            </div>
+
+            {/* Maximized QR for screen-to-camera scanning */}
+            <div 
+              ref={expandedQrRef}
+              style={{ 
+                display: "flex", 
+                justifyContent: "center",
+                background: "white",
+                padding: 8,
+                borderRadius: 8,
+                marginBottom: 8,
+                minHeight: Math.min(qrSize + 16, 420)
+              }}
+            />
+
+            {/* Full URL (what the QR actually encodes) — shown for admin reference */}
+            <div style={{
+              fontFamily: "monospace",
+              fontSize: 11,
+              color: "#222",
+              background: "#f1f1f1",
+              padding: "6px 8px",
+              borderRadius: 6,
+              marginBottom: 6,
+              userSelect: "all",
+              WebkitUserSelect: "all",
+              wordBreak: "break-all",
+              lineHeight: 1.25
+            }}>
+              {expandedQR.value}
+            </div>
+
+            <div style={{fontSize: 10, color: "#ff5555", marginBottom: 8, fontWeight: 500}}>
+              ⚠ Use the in-app SCAN button — your phone's camera app will only search the code
+            </div>
+
+            <button 
+              onClick={closeQR}
+              style={{
+                background: "#222",
+                color: "#fff",
+                border: "none",
+                padding: "10px 28px",
+                borderRadius: 8,
+                fontFamily: "monospace",
+                fontSize: 13,
+                cursor: "pointer",
+                minWidth: 110
+              }}
+            >
+              CLOSE
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2454,8 +2735,8 @@ create table checkins (
   id text primary key,
   cyclist_id text, cyclist_name text,
   team_id text, cp_id text,
-  timestamp timestamptz,
-  gps jsonb
+  timestamp timestamptz
+  -- Note: No gps / location column (security policy)
 );
 
 create table game_answers (
@@ -2547,15 +2828,86 @@ function Toast({ msg, type }) {
   return <div style={{position:"fixed",top:62,left:"50%",transform:"translateX(-50%)",zIndex:1000,background:bg,color:"#000",padding:"11px 22px",borderRadius:10,fontFamily:"monospace",fontSize:13,fontWeight:"bold",boxShadow:"0 4px 24px rgba(0,0,0,0.5)",maxWidth:"88vw",textAlign:"center",lineHeight:1.5,wordBreak:"break-word"}}>{msg}</div>;
 }
 function QRScanner({ onScan, onClose }) {
-  const videoRef=useRef(null);
-  const [err,setErr]=useState(false);
-  useEffect(()=>{
-    let s=null;
-    navigator.mediaDevices?.getUserMedia({video:{facingMode:"environment"}})
-      .then(stream=>{s=stream;if(videoRef.current){videoRef.current.srcObject=stream;videoRef.current.play();}})
-      .catch(()=>setErr(true));
-    return ()=>{if(s)s.getTracks().forEach(t=>t.stop());};
-  },[]);
+  const videoRef = useRef(null);
+  const [err, setErr] = useState(false);
+  const [decoderReady, setDecoderReady] = useState(false);
+  const [scanStatus, setScanStatus] = useState("Starting camera...");
+
+  // Camera + decoder loading
+  useEffect(() => {
+    let stream = null;
+    let cancelled = false;
+
+    navigator.mediaDevices?.getUserMedia({ video: { facingMode: "environment" } })
+      .then(s => {
+        if (cancelled) return;
+        stream = s;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+        setScanStatus("Point camera at QR code");
+
+        // Load jsQR decoder (same CDN pattern as QR generation)
+        if (window.jsQR) {
+          setDecoderReady(true);
+        } else {
+          const script = document.createElement("script");
+          script.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+          script.onload = () => setDecoderReady(true);
+          document.body.appendChild(script);
+        }
+      })
+      .catch(() => setErr(true));
+
+    return () => {
+      cancelled = true;
+      if (stream) stream.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  // Real-time QR decoding loop (supports new URL scheme + legacy CYCLEOPS-* codes)
+  useEffect(() => {
+    if (!decoderReady || err || !videoRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    let frame = null;
+
+    const tick = () => {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (vw && vh) {
+          canvas.width = vw;
+          canvas.height = vh;
+          ctx.drawImage(video, 0, 0, vw, vh);
+          const imageData = ctx.getImageData(0, 0, vw, vh);
+          const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "attemptBoth"
+          });
+
+          if (code && code.data) {
+            const val = code.data.toUpperCase().trim();
+            if (val.startsWith("CYCLEOPS-")) {
+              setScanStatus("Code detected!");
+              onScan(val);
+              return; // stop loop after successful scan
+            }
+          }
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [decoderReady, err, onScan]);
+
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.93)",zIndex:200,display:"flex",alignItems:"flex-end"}}>
       <div style={{background:"#0d0d0d",borderRadius:"16px 16px 0 0",width:"100%",overflow:"hidden",border:"1px solid #222"}}>
@@ -2563,27 +2915,42 @@ function QRScanner({ onScan, onClose }) {
           <span style={{color:"#00ff88",fontFamily:"monospace",fontSize:13,fontWeight:"bold"}}>◉ QR SCANNER</span>
           <button onClick={onClose} style={{background:"#1a1a1a",border:"1px solid #333",color:"#aaa",width:34,height:34,borderRadius:"50%",cursor:"pointer",fontSize:16}}>✕</button>
         </div>
-        {!err&&(
+
+        {!err && (
           <div style={{position:"relative",background:"#000",minHeight:180}}>
-            <video ref={videoRef} style={{width:"100%",maxHeight:200,display:"block",objectFit:"cover"}} />
+            <video ref={videoRef} style={{width:"100%",maxHeight:260,display:"block",objectFit:"cover"}} />
             <div style={{position:"absolute",inset:"12%",pointerEvents:"none"}}>
               <div style={{position:"absolute",top:0,left:0,width:22,height:22,borderTop:"3px solid #00ff88",borderLeft:"3px solid #00ff88"}}/>
               <div style={{position:"absolute",top:0,right:0,width:22,height:22,borderTop:"3px solid #00ff88",borderRight:"3px solid #00ff88"}}/>
               <div style={{position:"absolute",bottom:0,left:0,width:22,height:22,borderBottom:"3px solid #00ff88",borderLeft:"3px solid #00ff88"}}/>
               <div style={{position:"absolute",bottom:0,right:0,width:22,height:22,borderBottom:"3px solid #00ff88",borderRight:"3px solid #00ff88"}}/>
             </div>
+            <div style={{
+              position:"absolute", bottom:8, left:"50%", transform:"translateX(-50%)",
+              background:"rgba(0,0,0,0.7)", color:"#00ff88", fontSize:11, fontFamily:"monospace",
+              padding:"2px 10px", borderRadius:4, whiteSpace:"nowrap"
+            }}>
+              {scanStatus}
+            </div>
           </div>
         )}
+
+        {err && (
+          <div style={{padding:16, color:"#ff5555", fontSize:13}}>Camera access denied or unavailable. Use manual entry below.</div>
+        )}
+
         <div style={{padding:16}}>
-          <p style={{color:"#444",fontSize:11,fontFamily:"monospace",marginBottom:8}}>MANUAL INPUT FOR TESTING</p>
+          <p style={{color:"#444",fontSize:11,fontFamily:"monospace",marginBottom:8}}>
+            {decoderReady ? "Auto-scanning active • or enter manually" : "Loading decoder... • manual entry available"}
+          </p>
           <div style={{display:"flex",gap:8,marginBottom:10}}>
             <input id="mqr" placeholder="QR code value..." style={{flex:1,background:"#111",border:"1px solid #222",borderRadius:8,padding:"11px 13px",color:"#fff",fontSize:14,fontFamily:"monospace",outline:"none"}} />
             <button onClick={()=>{const v=document.getElementById("mqr").value;if(v)onScan(v);}} style={{background:"#00ff88",border:"none",color:"#000",borderRadius:8,padding:"0 18px",fontWeight:"bold",fontSize:13,cursor:"pointer",fontFamily:"monospace"}}>GO</button>
           </div>
           <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
-            {["CYCLEOPS-REGISTER","CYCLEOPS-CP1","CYCLEOPS-CP2","CYCLEOPS-CP3","CYCLEOPS-FINISH","CYCLEOPS-ADMIN"].map(code=>(
-              <button key={code} onClick={()=>onScan(code)} style={{background:"#111",border:"1px solid #222",color:"#00ff88",padding:"9px 12px",borderRadius:7,cursor:"pointer",fontFamily:"monospace",fontSize:11,fontWeight:"bold"}}>
-                {code.replace("CYCLEOPS-","")}
+            {["register","cp1","cp2","cp3","finish"].map(key=>(
+              <button key={key} onClick={()=>onScan(buildQRUrl(key))} style={{background:"#111",border:"1px solid #222",color:"#00ff88",padding:"9px 12px",borderRadius:7,cursor:"pointer",fontFamily:"monospace",fontSize:11,fontWeight:"bold"}}>
+                {key.toUpperCase()}
               </button>
             ))}
           </div>

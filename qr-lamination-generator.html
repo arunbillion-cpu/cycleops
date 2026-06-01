@@ -57,7 +57,8 @@
         <div class="text-sm leading-relaxed">
           <div class="font-semibold text-white mb-1">Instructions for Printing &amp; Lamination</div>
           <ul class="text-zinc-400 space-y-1 list-disc list-inside">
-            <li>These are <strong>real, scannable QR codes</strong> (not visual patterns).</li>
+            <li>These are <strong>real URL-based QR codes</strong> — they work with any phone camera.</li>
+            <li>Scanning opens <strong>cycleops.vercel.app</strong> and guides the participant (login → auto check-in).</li>
             <li>Download at <strong>1200px or 1600px</strong> for best print quality.</li>
             <li>Print on A4 or A3 paper, laminate, and place at the actual physical location.</li>
             <li>QR codes are deterministic — regenerating will always produce the identical code.</li>
@@ -72,7 +73,7 @@
     </div>
 
     <div class="mt-10 text-center text-xs text-zinc-500">
-      Generated for physical placement only • Do not share checkpoint QRs digitally
+      URL-based QRs • Work with native camera or in-app scanner • Regenerate only if domain changes
     </div>
   </div>
 
@@ -82,45 +83,47 @@
       document.documentElement.style.setProperty('--accent', '#10b981');
     }
 
+    // New unified URL-based QR codes (work with native phone camera + in-app scanner)
+    const PRODUCTION_BASE = "https://cycleops.vercel.app";
     const checkpoints = [
       {
         id: "start",
         label: "START POINT",
         sublabel: "0 km",
-        value: "CYCLEOPS-START",
-        instruction: "Pl scan for START",
+        value: `${PRODUCTION_BASE}/?action=checkin&cp=start`,
+        instruction: "Scan with any camera → opens app",
         color: "#00ff88"
       },
       {
         id: "cp1",
         label: "CP 1",
         sublabel: "16 km • Hydration Only",
-        value: "CYCLEOPS-CP1",
-        instruction: "Pl scan for CP1",
+        value: `${PRODUCTION_BASE}/?action=checkin&cp=cp1`,
+        instruction: "Scan with any camera → opens app",
         color: "#4af0ff"
       },
       {
         id: "cp2",
         label: "CP 2",
         sublabel: "22 km • Eye for Detail (30 marks)",
-        value: "CYCLEOPS-CP2",
-        instruction: "Pl scan for CP2",
+        value: `${PRODUCTION_BASE}/?action=checkin&cp=cp2`,
+        instruction: "Scan with any camera → opens app",
         color: "#ffbb00"
       },
       {
         id: "cp3",
         label: "CP 3",
         sublabel: "31 km • Hydration Only",
-        value: "CYCLEOPS-CP3",
-        instruction: "Pl scan for CP3",
+        value: `${PRODUCTION_BASE}/?action=checkin&cp=cp3`,
+        instruction: "Scan with any camera → opens app",
         color: "#4af0ff"
       },
       {
         id: "finish",
         label: "FINISH",
         sublabel: "40 km • End of Event",
-        value: "CYCLEOPS-FINISH",
-        instruction: "Pl scan for FINISH",
+        value: `${PRODUCTION_BASE}/?action=checkin&cp=finish`,
+        instruction: "Scan with any camera → opens app",
         color: "#00ff88"
       }
     ];
