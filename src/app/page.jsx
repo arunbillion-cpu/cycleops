@@ -364,6 +364,9 @@ export default function CycleOps() {
   // Debounce ref for manual score saves
   const manualSaveTimeoutRef = useRef(null);
 
+  // Live ref for success dialogue so dismiss handler never closes over stale state
+  const successDialogueRef = useRef(null);
+
   // UI status for manual scores saving
   const [manualScoresSaving, setManualScoresSaving] = useState(false);
 
@@ -382,6 +385,9 @@ export default function CycleOps() {
   const [regForm, setRegForm] = useState({name:"",age:"",phone:"",emergency:"",medical:false, password:""});
   const [isLoadingData, setIsLoadingData] = useState(true);
 
+  // Interactive success dialogues for check-ins and game/task completions (user request)
+  const [successDialogue, setSuccessDialogue] = useState(null);
+
 
 
   const showToast = useCallback((msg, type="success") => {
@@ -394,6 +400,24 @@ export default function CycleOps() {
     showToast(`DB error during ${operation}. Your changes are saved locally.`, "error");
     console.error(`DB ${operation} failed:`, error);
   }, [showToast]);
+
+  // Handler for closing interactive success dialogues + performing contextual navigation
+  // Uses ref to avoid stale closures on the dialogue data
+  const handleSuccessDismiss = (targetOverride) => {
+    const d = successDialogueRef.current || successDialogue;
+    setSuccessDialogue(null);
+    successDialogueRef.current = null;
+    if (!d) return;
+    let target = targetOverride;
+    if (!target) {
+      if (d.type === 'checkin') {
+        target = (d.cpId === 'cp2' ? 'eyeForDetail' : d.cpId === 'finish' ? 'finishQuestionnaire' : 'dashboard');
+      } else {
+        target = 'dashboard';
+      }
+    }
+    setView(target);
+  };
 
   // Expose load function for Admin refresh button (already used)
 
@@ -852,18 +876,23 @@ export default function CycleOps() {
       showToast(`Checked in locally at ${cp?.name}. Database save failed — will sync later.`, "warning");
     }
 
-    // Route to game if applicable
-    if (activeCP==="cp2") { setView("eyeForDetail"); return; } // Eye for Detail (30 marks)
-    // CP1 and CP3 are pure hydration stops - no games
-    if (activeCP==="cp1" || activeCP==="cp3") { 
-      setView("hydrationStop"); 
-      return; 
-    }
-    if (activeCP==="finish") { 
-      setView("finishQuestionnaire"); 
-      return; 
-    }
-    setView("home");
+    // Show interactive celebratory dialogue (makes check-ins feel alive per user request)
+    // User then chooses next step from the dialogue (start game / dashboard)
+    const checkinDialogue = {
+      type: 'checkin',
+      cpId: activeCP,
+      cpName: cp?.name || 'CHECKPOINT',
+      icon: cp?.icon || '📍',
+      timestamp: checkin.timestamp,
+      message: activeCP === 'cp2'
+        ? 'Checkpoint secured. Prepare for the Eye for Detail observation task.'
+        : activeCP === 'finish'
+        ? 'Finish line crossed. Complete your individual debrief questionnaire.'
+        : 'Arrival logged. Hydrate, rest briefly, and continue the route safely.',
+    };
+    setSuccessDialogue(checkinDialogue);
+    successDialogueRef.current = checkinDialogue;
+    // No immediate setView here — the SuccessDialogue onDismiss handler will navigate contextually.
   };
 
   // ── Register (Name + Team + Password only) ──
@@ -1037,6 +1066,7 @@ export default function CycleOps() {
 
       {toast && <Toast msg={toast.msg} type={toast.type} />}
       {showScanner && <QRScanner onScan={handleQRScan} onClose={()=>setShowScanner(false)} />}
+      {successDialogue && <SuccessDialogue data={successDialogue} onDismiss={handleSuccessDismiss} />}
 
       {/* NAV */}
       <nav style={NAV}>
@@ -1400,7 +1430,22 @@ function EyeForDetailView({ cyclist, gameAnswers, setGameAnswers, setView, showT
       showToast(`Submitted locally! Team scored ${finalScore} / 30 marks`);
     }
 
+    // Rich interactive dialogue for finishing the game (user-requested)
+    const eyeDialogue = {
+      type: 'game',
+      gameId: 'eyeForDetail',
+      title: 'EYE FOR DETAIL COMPLETE',
+      score: finalScore,
+      max: 30,
+      subtitle: 'Team observation recorded. Good work.',
+    };
+    setSuccessDialogue(eyeDialogue);
+    successDialogueRef.current = eyeDialogue;
+
     setSubmitting(false);
+
+    // Move to dashboard; the dialogue provides the celebratory moment as overlay
+    setView('dashboard');
   };
 
   if (teamAnswers || submitted) {
@@ -1552,7 +1597,19 @@ function FinishQuestionnaireView({ cyclist, setView, showToast, gameAnswers, set
       showToast("Answers saved locally (no DB connection). Admin can still review.", "warning");
     }
 
+    // Rich interactive dialogue for finishing the final task (user-requested)
+    const finishDialogue = {
+      type: 'finish',
+      title: 'DEBRIEF RECORDED',
+      subtitle: 'Answers are final. Admin will review and award 0-5 marks to the team.',
+    };
+    setSuccessDialogue(finishDialogue);
+    successDialogueRef.current = finishDialogue;
+
     setSubmitting(false);
+
+    // Move to dashboard; dialogue celebrates completion
+    setView('dashboard');
   };
 
   // If already submitted → show final confirmation (no editing allowed)
@@ -2956,6 +3013,143 @@ function Toast({ msg, type }) {
   const bg=type==="error"?"#ff5555":type==="warning"?"#ffbb00":"#00ff88";
   return <div style={{position:"fixed",top:62,left:"50%",transform:"translateX(-50%)",zIndex:1000,background:bg,color:"#000",padding:"11px 22px",borderRadius:10,fontFamily:"monospace",fontSize:13,fontWeight:"bold",boxShadow:"0 4px 24px rgba(0,0,0,0.5)",maxWidth:"88vw",textAlign:"center",lineHeight:1.5,wordBreak:"break-word"}}>{msg}</div>;
 }
+
+// Interactive success dialogue — celebratory & contextual for CP check-ins and game/task finishes
+function SuccessDialogue({ data, onDismiss }) {
+  if (!data) return null;
+  const isCheckin = data.type === 'checkin';
+  const isGame = data.type === 'game';
+  const isFinish = data.type === 'finish';
+
+  const ringStyle = {
+    width: 96, height: 96, borderRadius: '50%',
+    background: 'rgba(0,255,136,0.08)',
+    border: '3px solid #00ff88',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    margin: '0 auto 18px',
+    animation: 'successPop 420ms ease-out, ringPulse 1400ms ease-out 180ms 1',
+  };
+
+  const getTitle = () => {
+    if (isCheckin) return data.cpName || 'CHECKPOINT';
+    if (isGame) return data.title || 'OBJECTIVE COMPLETE';
+    if (isFinish) return data.title || 'DEBRIEF COMPLETE';
+    return data.title || 'SUCCESS';
+  };
+
+  return (
+    <div
+      onClick={() => onDismiss()}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.88)',
+        zIndex: 2100, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          ...CARD,
+          maxWidth: 440, width: '100%',
+          textAlign: 'center',
+          padding: '26px 18px 22px',
+          background: '#0a0f0a',
+          border: '2px solid #00ff88',
+          boxShadow: '0 16px 48px rgba(0,0,0,0.7)',
+          borderRadius: 16
+        }}
+      >
+        {/* Icon ring with pop + pulse */}
+        <div style={ringStyle}>
+          <div style={{ fontSize: 54, lineHeight: 1 }}>
+            {isCheckin ? (data.icon || '✅') : isGame ? '🎯' : '🏆'}
+          </div>
+        </div>
+
+        <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#00ff88', letterSpacing: 3, marginBottom: 2 }}>
+          {isCheckin ? 'ARRIVAL CONFIRMED' : isGame ? 'GAME COMPLETE' : 'TASK COMPLETE'}
+        </div>
+
+        <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', letterSpacing: 0.5, marginBottom: (isGame && data.score != null) ? 6 : 10 }}>
+          {getTitle()}
+        </div>
+
+        {/* Big score reveal for games */}
+        {isGame && typeof data.score === 'number' && (
+          <div style={{ margin: '6px 0 14px' }}>
+            <div style={{ fontFamily: 'monospace', fontSize: 56, fontWeight: 800, color: '#00ff88', lineHeight: 1 }}>
+              {data.score}
+            </div>
+            <div style={{ fontSize: 13, color: '#777', marginTop: 2 }}>OUT OF {data.max || 30} MARKS</div>
+          </div>
+        )}
+
+        {data.message && (
+          <div style={{ color: '#ccc', fontSize: 14, lineHeight: 1.45, margin: '6px 0 12px' }}>
+            {data.message}
+          </div>
+        )}
+        {data.subtitle && (
+          <div style={{ color: '#aaa', fontSize: 13, lineHeight: 1.4, marginBottom: 14 }}>
+            {data.subtitle}
+          </div>
+        )}
+
+        {/* Timestamp for check-ins */}
+        {isCheckin && data.timestamp && (
+          <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#555', marginBottom: 16 }}>
+            Logged • {formatTime(data.timestamp)}
+          </div>
+        )}
+
+        {/* Contextual primary actions (interactive part) */}
+        {isCheckin && data.cpId === 'cp2' && (
+          <button
+            onClick={() => onDismiss('eyeForDetail')}
+            style={{ ...BTN_PRIMARY, width: '100%', marginBottom: 8, background: '#00ff88', color: '#000', justifyContent: 'center' }}
+          >
+            START EYE FOR DETAIL (30 MARKS)
+          </button>
+        )}
+        {isCheckin && data.cpId === 'finish' && (
+          <button
+            onClick={() => onDismiss('finishQuestionnaire')}
+            style={{ ...BTN_PRIMARY, width: '100%', marginBottom: 8, background: '#ffbb00', color: '#000', justifyContent: 'center' }}
+          >
+            OPEN FINISH QUESTIONNAIRE
+          </button>
+        )}
+        {isCheckin && (data.cpId === 'cp1' || data.cpId === 'cp3' || !['cp2', 'finish'].includes(data.cpId || '')) && (
+          <button
+            onClick={() => onDismiss('dashboard')}
+            style={{ ...BTN_PRIMARY, width: '100%', marginBottom: 8, justifyContent: 'center' }}
+          >
+            BACK TO DASHBOARD
+          </button>
+        )}
+
+        {/* Game and Finish task completions */}
+        {(isGame || isFinish) && (
+          <button
+            onClick={() => onDismiss('dashboard')}
+            style={{ ...BTN_PRIMARY, width: '100%', marginBottom: 8, justifyContent: 'center' }}
+          >
+            BACK TO DASHBOARD
+          </button>
+        )}
+
+        {/* Always-available subtle close (still performs smart nav for check-ins) */}
+        <button
+          onClick={() => onDismiss()}
+          style={{ width: '100%', background: 'transparent', border: '1px solid #222', color: '#666', borderRadius: 10, padding: '10px 12px', fontFamily: 'monospace', fontSize: 12, marginTop: 4 }}
+        >
+          CLOSE
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function QRScanner({ onScan, onClose }) {
   const videoRef = useRef(null);
   const [err, setErr] = useState(false);
@@ -3137,6 +3331,16 @@ const CSS=`
     72%  { transform: rotateY(260deg) scale(1.12); }
     78%  { transform: rotateY(280deg) scale(1); }
     100% { transform: rotateY(360deg) scale(1); }
+  }
+  @keyframes successPop {
+    0% { transform: scale(0.5); opacity: 0; }
+    60% { transform: scale(1.08); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes ringPulse {
+    0% { box-shadow: 0 0 0 0 rgba(0,255,136,0.55); }
+    70% { box-shadow: 0 0 0 24px rgba(0,255,136,0); }
+    100% { box-shadow: 0 0 0 0 rgba(0,255,136,0); }
   }
   select option{background:#0d0d0d;color:#fff;}
   details>summary{list-style:none;}
