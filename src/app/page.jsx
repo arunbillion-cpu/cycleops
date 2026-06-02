@@ -40,7 +40,7 @@ const FINISH_QUESTIONNAIRE_QUESTIONS = [
 //
 // CONFIG (see .env.local.example)
 import { useState, useEffect, useRef, useCallback } from "react";
-import { supabase, safeInsert, safeUpsert } from "../lib/supabase/client";
+import { supabase } from "../lib/supabase/client";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -100,18 +100,6 @@ function pickMotivational(type) {
   const pool = MOTIVATIONAL_LINES[type] || MOTIVATIONAL_LINES.checkin;
   return pool[Math.floor(Math.random() * pool.length)];
 }
-
-/** 
- * Centralized list of all tables that hold event data.
- * Use this in cleanup scripts, admin tools, and data loading to avoid missing tables.
- */
-export const KNOWN_TABLES = [
-  "participants",
-  "checkins",
-  "game_answers",
-  "jerrican_carry",
-  "manual_scores",
-];
 
 // ══════════════════════════════════════
 // URL-BASED QR CODES (unified for native camera + in-app scanner)
@@ -283,56 +271,8 @@ const DEFAULT_SCORING = {
 // All database operations now use the modern Supabase client.
 // All DB operations now use the official Supabase client + safeInsert/safeUpsert.
 
-// Test connection + basic write permission (production-grade version)
-async function testSupabaseConnection() {
-  try {
-    // Connection test helper (no debug markers in production)
-
-    // 1. Read test using official client
-    const { error: readError } = await supabase
-      .from("participants")
-      .select("id")
-      .limit(1);
-
-    if (readError) {
-      return { ok: false, step: "read", error: readError.message };
-    }
-
-    // 2. Lightweight write test using safe helper (we clean it up)
-    const testId = "conn_test_" + Date.now();
-    const writePayload = {
-      id: testId,
-      name: "CONNECTION_TEST",
-      age: 99,
-      phone: "0000000000",
-      emergency: "test",
-      team_id: "alpha",
-      password: "test",
-      registered_at: new Date().toISOString(),
-    };
-
-    const { error: writeError } = await safeInsert("participants", writePayload);
-    if (writeError) {
-      return { ok: false, step: "write", error: writeError.message || writeError };
-    }
-
-    // 3. Cleanup
-    await supabase.from("participants").delete().eq("id", testId);
-
-    return { ok: true, step: "ok" };
-  } catch (e) {
-    return { ok: false, step: "exception", error: e?.message || "Unknown error" };
-  }
-}
-
-// Full reset disabled for safety (as requested).
-// Use Supabase Dashboard → Table Editor to clear tables manually when needed.
-async function resetAllSupabaseData(showToast) {
-  if (showToast) {
-    showToast("Full data reset is disabled in the app for safety. Please clear tables directly from the Supabase dashboard.", "warning");
-  }
-  return false;
-}
+// Note: Supabase connection test and full reset helpers were removed
+// as they were dev/debug artifacts. Use Supabase dashboard for admin DB tasks.
 
 // ══════════════════════════════════════
 // GPS HELPER — REMOVED
@@ -356,7 +296,6 @@ export default function CycleOps() {
   const [view, setView] = useState("home");
   const [showScanner, setShowScanner] = useState(false);
   const [toast, setToast] = useState(null);
-  const [supabaseStatus, setSupabaseStatus] = useState(null); // null | "testing" | {ok:true} | {ok:false, error, step}
 
   // ── Auth ──
   const [cyclist, setCyclist] = useState(null);      // logged-in cyclist
@@ -1154,7 +1093,6 @@ export default function CycleOps() {
           manualScores={manualScores} setManualScores={setManualScores}
           scoring={scoring} setScoring={setScoring} 
           setView={setView} showToast={showToast} 
-          supabaseStatus={supabaseStatus} setSupabaseStatus={setSupabaseStatus}
           onRefreshData={loadEventDataFromDB}
           onAdminLogout={() => { setAdminAuth(false); setAdminPin(""); setView("home"); showToast("Logged out of Admin"); }}
           lastDbSync={lastDbSync}
@@ -1978,188 +1916,8 @@ function CPCheckinView({ activeCP, cyclist, checkins, onCheckin, setView }) {
   );
 }
 
-// ══════════════════════════════════════
-// GAME 1 — Counter Intel Tracking Op
-// ══════════════════════════════════════
-function Game1View({ cyclist, gameAnswers, onSubmit, setView, showToast }) {
-  const [answers, setAnswers] = useState({});
-  const [result, setResult] = useState(null);
-  const already = gameAnswers.find(a=>a.cyclistId===cyclist?.id&&a.game==="game1");
 
-  const submit = () => {
-    if (Object.keys(answers).length<GAME1_QUESTIONS.length) { showToast("Answer all questions","error"); return; }
-    const res = onSubmit(answers);
-    setResult(res);
-  };
 
-  if (already||result) {
-    const r = already||result;
-    return (
-      <div className="fadeUp" style={{padding:"0 16px"}}>
-        <PageHeader icon="👁️" title="COUNTER INTEL" sub="Game 1 — Your result" />
-        <div style={{...CARD,textAlign:"center",padding:28}}>
-          <div style={{fontSize:48,marginBottom:12}}>🎯</div>
-          <div style={{fontFamily:"monospace",fontSize:44,fontWeight:"bold",color:"#00ff88"}}>{r.correct||already?.correct}/{GAME1_QUESTIONS.length}</div>
-          <div style={{fontSize:13,color:"#666",fontFamily:"monospace",marginTop:6}}>+{r.score||already?.score} POINTS</div>
-        </div>
-        <BkBtn onClick={()=>setView("dashboard")} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="fadeUp" style={{padding:"0 16px"}}>
-      <PageHeader icon="👁️" title="COUNTER INTEL TRACKING OP" sub="Game 1 at CP1 · 20 marks · 4 pts each" />
-      <div style={{...CARD,marginBottom:16,background:"rgba(0,255,136,0.04)",borderColor:"rgba(0,255,136,0.15)"}}>
-        <div style={{fontFamily:"monospace",fontSize:11,color:"#00ff88",marginBottom:6}}>⚠️ MISSION BRIEFING</div>
-        <div style={{fontSize:13,color:"#aaa",lineHeight:1.7}}>Enemy agents have deployed intelligence items along the route. You have been tracking them. Identify the correct items from your observation. Choose carefully — your team's score depends on you.</div>
-      </div>
-      {GAME1_QUESTIONS.map((q,i)=>(
-        <div key={i} style={{...CARD,marginBottom:12}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-            <div style={QBADGE}>Q{i+1}</div>
-            <div style={{fontFamily:"monospace",fontSize:10,color:"#555"}}>4 MARKS</div>
-          </div>
-          <p style={{fontSize:14,color:"#ddd",lineHeight:1.65,marginBottom:14}}>{q.q}</p>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {q.options.map(opt=>{
-              const sel = answers[i]===opt;
-              return (
-                <button key={opt} onClick={()=>setAnswers(p=>({...p,[i]:opt}))}
-                  style={{background:sel?"rgba(0,255,136,0.12)":"#0a0a0a",border:`2px solid ${sel?"#00ff88":"#1a1a1a"}`,borderRadius:10,padding:"13px 8px",cursor:"pointer",fontFamily:"monospace",fontSize:12,color:sel?"#00ff88":"#999",transition:"all 0.15s",textAlign:"center",lineHeight:1.4}}>
-                  {opt}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-      <PBtn onClick={submit} icon="✅" label="SUBMIT ANSWERS" sub={`${Object.keys(answers).length}/${GAME1_QUESTIONS.length} answered`} disabled={Object.keys(answers).length<GAME1_QUESTIONS.length} />
-      <BkBtn onClick={()=>setView("dashboard")} />
-    </div>
-  );
-}
-
-// ══════════════════════════════════════
-// GAME 3 removed during cleanup (old blindfold game no longer used)
-
-// ══════════════════════════════════════
-// GAME 4 — Rapid Fire Quiz
-// ══════════════════════════════════════
-function Game4View({ cyclist, gameAnswers, onSubmit, setView, showToast }) {
-  const [answers, setAnswers] = useState({});
-  const [result, setResult] = useState(null);
-  const already = gameAnswers.find(a=>a.cyclistId===cyclist?.id&&a.game==="game4");
-
-  const submit = () => {
-    if (Object.keys(answers).length<GAME4_QUESTIONS.length) { showToast("Answer all questions","error"); return; }
-    const res = onSubmit(answers);
-    setResult(res);
-  };
-
-  if (already||result) {
-    const r = already||result;
-    return (
-      <div className="fadeUp" style={{padding:"0 16px"}}>
-        <PageHeader icon="🧩" title="RAPID FIRE QUIZ" sub="Game 4 — Your result" />
-        <div style={{...CARD,textAlign:"center",padding:28}}>
-          <div style={{fontSize:48,marginBottom:12}}>🎯</div>
-          <div style={{fontFamily:"monospace",fontSize:44,fontWeight:"bold",color:"#00ff88"}}>{r.correct||already?.correct}/{GAME4_QUESTIONS.length}</div>
-          <div style={{fontSize:13,color:"#666",fontFamily:"monospace",marginTop:6}}>+{r.score||already?.score} POINTS</div>
-        </div>
-        <BkBtn onClick={()=>setView("dashboard")} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="fadeUp" style={{padding:"0 16px"}}>
-      <PageHeader icon="🧩" title="RAPID FIRE QUIZ" sub="Game 4 at CP3 · 15 marks · 3 pts each" />
-      <div style={{...CARD,marginBottom:16,background:"rgba(255,187,0,0.04)",borderColor:"rgba(255,187,0,0.15)"}}>
-        <div style={{fontFamily:"monospace",fontSize:11,color:"#ffbb00",marginBottom:6}}>⚡ COUNTER INTEL INTERROGATION</div>
-        <div style={{fontSize:13,color:"#aaa",lineHeight:1.7}}>You have been captured by the enemy. Answer these 5 rapid-fire questions correctly. One option in each question is a deliberate trap. Stay sharp.</div>
-      </div>
-      {GAME4_QUESTIONS.map((q,i)=>(
-        <div key={i} style={{...CARD,marginBottom:12}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-            <div style={{...QBADGE,background:"rgba(255,187,0,0.1)",borderColor:"rgba(255,187,0,0.2)",color:"#ffbb00"}}>Q{i+1}</div>
-            <div style={{fontFamily:"monospace",fontSize:10,color:"#555"}}>3 MARKS</div>
-          </div>
-          <p style={{fontSize:14,color:"#ddd",lineHeight:1.65,marginBottom:14}}>{q.q}</p>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {q.options.map(opt=>{
-              const sel = answers[i]===opt;
-              const isFunny = opt===q.funny;
-              return (
-                <button key={opt} onClick={()=>setAnswers(p=>({...p,[i]:opt}))}
-                  style={{background:sel?(isFunny?"rgba(255,100,0,0.1)":"rgba(0,255,136,0.12)"):"#0a0a0a",
-                    border:`2px solid ${sel?(isFunny?"#ff6400":"#00ff88"):"#1a1a1a"}`,
-                    borderRadius:10,padding:"13px 8px",cursor:"pointer",fontFamily:"monospace",fontSize:12,
-                    color:sel?(isFunny?"#ff6400":"#00ff88"):(isFunny?"#555":"#999"),
-                    transition:"all 0.15s",textAlign:"center",lineHeight:1.4,
-                    fontStyle:isFunny?"italic":"normal"}}>
-                  {opt} {isFunny&&!sel?"😄":""}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-      <PBtn onClick={submit} icon="✅" label="SUBMIT ANSWERS" sub={`${Object.keys(answers).length}/${GAME4_QUESTIONS.length} answered`} disabled={Object.keys(answers).length<GAME4_QUESTIONS.length} />
-      <BkBtn onClick={()=>setView("dashboard")} />
-    </div>
-  );
-}
-
-// ══════════════════════════════════════
-// Finish Questionnaire (now integrated directly in the app)
-// ══════════════════════════════════════
-function Game5View({ cyclist, gameAnswers, setGameAnswers, setView, showToast }) {
-  const [answers, setAnswers] = useState(["","",""]);
-  const already = gameAnswers.find(a=>a.cyclistId===cyclist?.id&&a.game==="game5");
-
-  const submit = () => {
-    if (answers.some(a=>!a.trim())) { showToast("Answer all questions","error"); return; }
-    const entry = { id:genId(), cyclistId:cyclist.id, cyclistName:cyclist.name, teamId:cyclist.teamId, game:"game5", answers, score:0, submittedAt:new Date().toISOString() };
-    setGameAnswers(prev=>[...prev,entry]);
-    showToast("Answers submitted! Admin will score.");
-    setView("dashboard");
-  };
-
-  if (already) {
-    return (
-      <div className="fadeUp" style={{padding:"0 16px"}}>
-        <PageHeader icon="🏆" title="FINISH QUESTIONNAIRE" sub="Already submitted" />
-        <div style={{...CARD,textAlign:"center",padding:28}}>
-          <div style={{fontSize:48,marginBottom:10}}>✅</div>
-          <div style={{fontFamily:"monospace",color:"#00ff88",fontSize:14}}>Submitted! Admin will award 0–10 marks.</div>
-        </div>
-        <BkBtn onClick={()=>setView("dashboard")} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="fadeUp" style={{padding:"0 16px"}}>
-      <PageHeader icon="🏆" title="FINISH QUESTIONNAIRE" sub="Admin scored (0-5 per team)" />
-      <div style={{...CARD,marginBottom:16,background:"rgba(74,240,255,0.04)",borderColor:"rgba(74,240,255,0.15)"}}>
-        <div style={{fontFamily:"monospace",fontSize:11,color:"#4af0ff",marginBottom:6}}>🏁 DEBRIEF QUESTIONNAIRE</div>
-        <div style={{fontSize:13,color:"#aaa",lineHeight:1.7}}>You have completed the mission. Answer these debrief questions honestly. Your answers will be reviewed by the admin. Points 0–10 awarded for best answers.</div>
-      </div>
-      {GAME5_QUESTIONS.map((q,i)=>(
-        <div key={i} style={{...CARD,marginBottom:12}}>
-          <div style={{...QBADGE,marginBottom:10,display:"inline-flex",background:"rgba(74,240,255,0.08)",borderColor:"rgba(74,240,255,0.2)",color:"#4af0ff"}}>Q{i+1}</div>
-          <p style={{fontSize:14,color:"#ddd",lineHeight:1.65,marginBottom:12}}>{q}</p>
-          <textarea value={answers[i]} onChange={e=>{const a=[...answers];a[i]=e.target.value;setAnswers(a);}}
-            placeholder="Your answer..." rows={2}
-            style={{width:"100%",background:"#080808",border:"1px solid #1a1a1a",borderRadius:10,padding:"12px 14px",color:"#fff",fontSize:14,fontFamily:"inherit",resize:"none",outline:"none"}} />
-        </div>
-      ))}
-      <PBtn onClick={submit} icon="🏁" label="SUBMIT DEBRIEF" sub="Final submission" />
-      <BkBtn onClick={()=>setView("dashboard")} />
-    </div>
-  );
-}
 
 // ══════════════════════════════════════
 // LEADERBOARD
@@ -2528,7 +2286,7 @@ function AdminAuthView({ adminPin, setAdminPin, onAuth, setView }) {
 // ══════════════════════════════════════
 // ADMIN DASHBOARD
 // ══════════════════════════════════════
-function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, manualScores, setManualScores, scoring, setScoring, setView, showToast, supabaseStatus, setSupabaseStatus, onRefreshData, onAdminLogout, lastDbSync, setLastDbSync, manualScoresSaving, manualScoresLastSaved, jerricanFinishOrder, setJerricanFinishOrder, saveJerricanToDB }) {
+function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, manualScores, setManualScores, scoring, setScoring, setView, showToast, onRefreshData, onAdminLogout, lastDbSync, setLastDbSync, manualScoresSaving, manualScoresLastSaved, jerricanFinishOrder, setJerricanFinishOrder, saveJerricanToDB }) {
   const [tab, setTab] = useState("overview");
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -2937,44 +2695,6 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
               </div>
             </div>
 
-            {/* SUPABASE CONNECTION TESTER */}
-            <p style={SEC_LABEL}>SUPABASE CONNECTION (Official Client)</p>
-            <div style={{...CARD,marginBottom:16}}>
-              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-                <button
-                  onClick={async () => {
-                    setSupabaseStatus("testing");
-                    const result = await testSupabaseConnection();
-                    setSupabaseStatus(result);
-                    if (result.ok) {
-                      showToast("Supabase connection OK — read + write both work");
-                    } else {
-                      showToast("Supabase test failed at step: " + result.step + " — " + result.error, "error");
-                    }
-                  }}
-                  disabled={supabaseStatus==="testing"}
-                  style={{background:"#111",border:"1px solid #00ff88",color:"#00ff88",borderRadius:8,padding:"10px 16px",cursor:"pointer",fontFamily:"monospace",fontSize:12}}>
-                  {supabaseStatus==="testing" ? "TESTING..." : "TEST SUPABASE CONNECTION"}
-                </button>
-
-                {/* Dangerous Reset button removed for safety. 
-                    Database wipes should only be done directly in Supabase dashboard. */}
-
-              </div>
-
-              {supabaseStatus && supabaseStatus !== "testing" && (
-                <div style={{marginTop:12,fontSize:12,fontFamily:"monospace",color:supabaseStatus.ok?"#00ff88":"#ff6666"}}>
-                  {supabaseStatus.ok
-                    ? "✓ Connection successful — read + write + cleanup all worked"
-                    : `✗ Failed at "${supabaseStatus.step}": ${supabaseStatus.error}`}
-                </div>
-              )}
-
-              <div style={{marginTop:10,fontSize:11,color:"#666"}}>
-                Current target: {SUPABASE_URL ? SUPABASE_URL.replace(/https?:\/\//,"").split(".")[0] + ".supabase.co" : "NOT CONFIGURED"}
-              </div>
-            </div>
-
             <p style={SEC_LABEL}>SCORING CONFIG (LIVE EDIT)</p>
             {Object.entries(scoring).map(([key,s])=>(
               <div key={key} style={{...CARD,marginBottom:10}}>
@@ -2989,37 +2709,6 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
                 <div style={{fontSize:11,color:"#555",lineHeight:1.5}}>{s.note}</div>
               </div>
             ))}
-
-            <p style={{fontFamily:"monospace",fontSize:10,color:"#444",marginTop:16,marginBottom:8}}>SUPABASE SQL SCHEMA (run this once if tables are missing)</p>
-            <div style={{background:"#080808",border:"1px solid #1a1a1a",borderRadius:8,padding:14,fontFamily:"monospace",fontSize:10,color:"#555",lineHeight:1.8,overflowX:"auto",whiteSpace:"pre"}}>
-{`-- Run this in Supabase SQL Editor
-create table participants (
-  id text primary key,
-  name text, age int, phone text,
-  emergency text, team_id text,
-  registered_at timestamptz
-);
-
-create table checkins (
-  id text primary key,
-  cyclist_id text, cyclist_name text,
-  team_id text, cp_id text,
-  timestamp timestamptz
-  -- Note: No gps / location column (security policy)
-);
-
-create table game_answers (
-  id text primary key,
-  cyclist_id text, cyclist_name text,
-  team_id text, game text,
-  answers jsonb, score int,
-  submitted_at timestamptz
-);`}
-            </div>
-
-            <div style={{fontSize:10,color:"#555",marginTop:16}}>
-              Tip: Since RLS is disabled on your project, the anon key can freely write. For production events you may want to re-enable RLS with stricter policies after the event.
-            </div>
           </div>
         )}
 
