@@ -81,6 +81,36 @@ async function cleanupDatabase() {
 
   console.log("\n✅ Database cleanup complete.");
   console.log("The database is now clean and ready for the real event.");
+
+  console.log("\n🛡️  Dropping custom RLS policies (to allow full cleanup in future runs)...");
+
+  const rlsPoliciesToDrop = [
+    'DROP POLICY IF EXISTS "Anon can insert check-ins" ON checkins;',
+    'DROP POLICY IF EXISTS "Anon can view check-ins" ON checkins;',
+    'DROP POLICY IF EXISTS "Anon can insert own answers" ON game_answers;',
+    'DROP POLICY IF EXISTS "Anon can view game answers" ON game_answers;',
+    'DROP POLICY IF EXISTS "Anon can register" ON participants;',
+    'DROP POLICY IF EXISTS "Anon can view participants" ON participants;',
+    'DROP POLICY IF EXISTS "No access for anon" ON jerrican_carry;',
+    'DROP POLICY IF EXISTS "No access for anon" ON manual_scores;',
+    'DROP POLICY IF EXISTS "Service role has full access" ON checkins;',
+    'DROP POLICY IF EXISTS "Service role has full access" ON game_answers;',
+    'DROP POLICY IF EXISTS "Service role has full access" ON jerrican_carry;',
+    'DROP POLICY IF EXISTS "Service role has full access" ON manual_scores;',
+    'DROP POLICY IF EXISTS "Service role has full access" ON participants;',
+  ];
+
+  for (const sql of rlsPoliciesToDrop) {
+    try {
+      // Note: anon client cannot drop policies. This is here for documentation.
+      // Always run policy drops in Supabase SQL Editor.
+      console.log("   Please run in SQL Editor if needed: " + sql);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  console.log("\n✅ Cleanup script finished. Run the printed SQL statements in Supabase SQL Editor for complete reset.");
 }
 
 cleanupDatabase().catch(console.error);
