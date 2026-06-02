@@ -72,6 +72,35 @@ const CHECKPOINTS = [
   { id:"finish",name:"FINISH (FP)",label:"Finish + Jerrican + Questionnaire", km:40, icon:"🏆", qrKey:"finish" },
 ];
 
+// Decent, motivating, lightly humorous lines for dialogues (inclusive for all participants)
+const MOTIVATIONAL_LINES = {
+  checkin: [
+    "Checkpoint secured. One more unknown removed from the route.",
+    "Arrival logged. The hills don't care — but you showed up anyway.",
+    "Presence confirmed. Every pedal that got you here counts.",
+  ],
+  eye: [
+    "Hawk eyes logged. Those details just became 30 marks for the team.",
+    "Observation complete. Your memory is now a tactical asset.",
+    "Intel captured. The team rides smarter because of what you saw.",
+  ],
+  finish: [
+    "Debrief recorded. Honest answers like that make teams stronger.",
+    "Final questions answered. You turned the day's story into data.",
+    "Submission complete. Fatigue met focus — and focus won.",
+  ],
+  complete: [
+    "Every CP hit, every game closed, every answer given. You owned the hard conditions.",
+    "Route + details + debrief — all secured. This is disciplined endurance in action.",
+    "CycleOps complete. You didn't just finish the distance; you mastered the mission.",
+  ],
+};
+
+function pickMotivational(type) {
+  const pool = MOTIVATIONAL_LINES[type] || MOTIVATIONAL_LINES.checkin;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 /** 
  * Centralized list of all tables that hold event data.
  * Use this in cleanup scripts, admin tools, and data loading to avoid missing tables.
@@ -889,6 +918,7 @@ export default function CycleOps() {
         : activeCP === 'finish'
         ? 'Finish line crossed. Complete your individual debrief questionnaire.'
         : 'Arrival logged. Hydrate, rest briefly, and continue the route safely.',
+      motivational: pickMotivational('checkin'),
     };
     setSuccessDialogue(checkinDialogue);
     successDialogueRef.current = checkinDialogue;
@@ -1438,6 +1468,7 @@ function EyeForDetailView({ cyclist, gameAnswers, setGameAnswers, setView, showT
       score: finalScore,
       max: 30,
       subtitle: 'Team observation recorded. Good work.',
+      motivational: pickMotivational('eye'),
     };
     setSuccessDialogue(eyeDialogue);
     successDialogueRef.current = eyeDialogue;
@@ -1597,11 +1628,22 @@ function FinishQuestionnaireView({ cyclist, setView, showToast, gameAnswers, set
       showToast("Answers saved locally (no DB connection). Admin can still review.", "warning");
     }
 
+    // Detect full personal completion for special motivational close
+    const hasAllCPs = ["cp1", "cp2", "cp3", "finish"].every(cid =>
+      checkins.some(c => c.cyclistId === cyclist.id && c.cpId === cid)
+    );
+    const eyeDone = gameAnswers.some(a => a.teamId === cyclist.teamId && a.game === "eye_for_detail");
+    const isFullComplete = hasAllCPs && eyeDone;
+
     // Rich interactive dialogue for finishing the final task (user-requested)
     const finishDialogue = {
       type: 'finish',
-      title: 'DEBRIEF RECORDED',
-      subtitle: 'Answers are final. Admin will review and award 0-5 marks to the team.',
+      title: isFullComplete ? 'EVENT COMPLETE' : 'DEBRIEF RECORDED',
+      subtitle: isFullComplete
+        ? 'Every milestone hit. Route, games, and debrief — all secured.'
+        : 'Answers are final. Admin will review and award 0-5 marks to the team.',
+      motivational: pickMotivational(isFullComplete ? 'complete' : 'finish'),
+      ...(isFullComplete ? { isEpic: true } : {}),
     };
     setSuccessDialogue(finishDialogue);
     successDialogueRef.current = finishDialogue;
@@ -1736,6 +1778,19 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
   const myAnswers = gameAnswers.filter(a=>a.cyclistId===cyclist.id);
   const teamData = lb.find(t=>t.id===cyclist.teamId);
 
+  // Milestone activity rings calculations (fitness-watch style for CPs + games)
+  const cpMilestones = ["cp1", "cp2", "cp3", "finish"];
+  const completedCPs = cpMilestones.filter(id => myCPs.some(c => c.cpId === id)).length;
+  const cpProgress = Math.round((completedCPs / 4) * 100);
+
+  const hasEye = gameAnswers.some(a => a.teamId === cyclist.teamId && a.game === "eye_for_detail");
+  const hasFinishQ = myAnswers.some(a => a.game === "finish_questionnaire");
+  const gamesDone = (hasEye ? 1 : 0) + (hasFinishQ ? 1 : 0);
+  const gamesProgress = Math.round((gamesDone / 2) * 100);
+
+  const scoreVal = teamData?.scores.total || 0;
+  const scoreProgress = Math.min(100, scoreVal);
+
   const quickCPs = CHECKPOINTS.slice(1); // exclude START from manual list
 
   return (
@@ -1754,6 +1809,34 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
             <div style={{fontSize:10,color:"#555",fontFamily:"monospace"}}>/ 100 PTS</div>
             <div style={{fontSize:11,color:"#888",marginTop:2}}>RANK #{teamData?.rank||"—"}</div>
           </div>
+        </div>
+      </div>
+
+      {/* ACTIVITY RINGS — visual milestones for CPs and games (like fitness watch rings) */}
+      <div style={{...CARD, marginBottom: 14, background: "#0a0c0a"}}>
+        <p style={{...SEC_LABEL, marginBottom: 10}}>MILESTONES — ACTIVITY RINGS</p>
+        <div style={{display: "flex", justifyContent: "space-around", alignItems: "flex-start", padding: "4px 0 8px"}}>
+          <ProgressRing
+            percent={cpProgress}
+            color="#00ff88"
+            label={`ROUTE ${completedCPs}/4`}
+            sublabel="Checkpoints"
+          />
+          <ProgressRing
+            percent={gamesProgress}
+            color="#ffbb00"
+            label={`GAMES ${gamesDone}/2`}
+            sublabel="Objectives"
+          />
+          <ProgressRing
+            percent={scoreProgress}
+            color={team.color}
+            label={`${scoreVal} PTS`}
+            sublabel="Team Score"
+          />
+        </div>
+        <div style={{fontSize: 10, color: "#555", textAlign: "center", marginTop: 2, letterSpacing: 0.5}}>
+          Fill the rings. Own the event.
         </div>
       </div>
 
@@ -3009,6 +3092,55 @@ function PBtn({ onClick, icon, label, sub, disabled, style={} }) {
 function BkBtn({ onClick }) {
   return <button onClick={onClick} style={{width:"100%",background:"transparent",border:"1px solid #111",color:"#444",borderRadius:10,padding:"13px",cursor:"pointer",marginTop:10,fontFamily:"monospace",fontSize:13,textAlign:"center"}}>← BACK</button>;
 }
+
+// Fitness-watch style activity ring (SVG, animated fill, for CP + game milestones)
+function ProgressRing({ percent, color = "#00ff88", size = 76, stroke = 7, label, sublabel }) {
+  const r = (size - stroke) / 2;
+  const c = r * 2 * Math.PI;
+  const p = Math.max(0, Math.min(100, percent || 0));
+  const offset = c * (1 - p / 100);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 72 }}>
+      <svg width={size} height={size} style={{ overflow: "visible" }}>
+        {/* background ring */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="#1a1a1a"
+          strokeWidth={stroke}
+        />
+        {/* progress ring — starts at top, clockwise */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={stroke}
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{
+            transition: "stroke-dashoffset 650ms cubic-bezier(0.23, 1, 0.32, 1)",
+            transform: "rotate(-90deg)",
+            transformOrigin: "50% 50%",
+          }}
+        />
+      </svg>
+      <div style={{ marginTop: 5, fontFamily: "monospace", fontSize: 11, fontWeight: 700, color: color, letterSpacing: 0.5 }}>
+        {label}
+      </div>
+      {sublabel && (
+        <div style={{ fontSize: 9, color: "#666", marginTop: 1, letterSpacing: 0.3 }}>
+          {sublabel}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Toast({ msg, type }) {
   const bg=type==="error"?"#ff5555":type==="warning"?"#ffbb00":"#00ff88";
   return <div style={{position:"fixed",top:62,left:"50%",transform:"translateX(-50%)",zIndex:1000,background:bg,color:"#000",padding:"11px 22px",borderRadius:10,fontFamily:"monospace",fontSize:13,fontWeight:"bold",boxShadow:"0 4px 24px rgba(0,0,0,0.5)",maxWidth:"88vw",textAlign:"center",lineHeight:1.5,wordBreak:"break-word"}}>{msg}</div>;
@@ -3020,11 +3152,12 @@ function SuccessDialogue({ data, onDismiss }) {
   const isCheckin = data.type === 'checkin';
   const isGame = data.type === 'game';
   const isFinish = data.type === 'finish';
+  const isEpic = !!data.isEpic;
 
   const ringStyle = {
     width: 96, height: 96, borderRadius: '50%',
-    background: 'rgba(0,255,136,0.08)',
-    border: '3px solid #00ff88',
+    background: isEpic ? 'rgba(255,187,0,0.1)' : 'rgba(0,255,136,0.08)',
+    border: isEpic ? '3px solid #ffbb00' : '3px solid #00ff88',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     margin: '0 auto 18px',
     animation: 'successPop 420ms ease-out, ringPulse 1400ms ease-out 180ms 1',
@@ -3054,7 +3187,7 @@ function SuccessDialogue({ data, onDismiss }) {
           textAlign: 'center',
           padding: '26px 18px 22px',
           background: '#0a0f0a',
-          border: '2px solid #00ff88',
+          border: isEpic ? '2px solid #ffbb00' : '2px solid #00ff88',
           boxShadow: '0 16px 48px rgba(0,0,0,0.7)',
           borderRadius: 16
         }}
@@ -3062,12 +3195,12 @@ function SuccessDialogue({ data, onDismiss }) {
         {/* Icon ring with pop + pulse */}
         <div style={ringStyle}>
           <div style={{ fontSize: 54, lineHeight: 1 }}>
-            {isCheckin ? (data.icon || '✅') : isGame ? '🎯' : '🏆'}
+            {isEpic ? '🏅' : (isCheckin ? (data.icon || '✅') : isGame ? '🎯' : '🏆')}
           </div>
         </div>
 
-        <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#00ff88', letterSpacing: 3, marginBottom: 2 }}>
-          {isCheckin ? 'ARRIVAL CONFIRMED' : isGame ? 'GAME COMPLETE' : 'TASK COMPLETE'}
+        <div style={{ fontFamily: 'monospace', fontSize: 11, color: isEpic ? '#ffbb00' : '#00ff88', letterSpacing: 3, marginBottom: 2 }}>
+          {isEpic ? 'FULL MISSION ACCOMPLISHED' : (isCheckin ? 'ARRIVAL CONFIRMED' : isGame ? 'GAME COMPLETE' : 'TASK COMPLETE')}
         </div>
 
         <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', letterSpacing: 0.5, marginBottom: (isGame && data.score != null) ? 6 : 10 }}>
@@ -3099,6 +3232,23 @@ function SuccessDialogue({ data, onDismiss }) {
         {isCheckin && data.timestamp && (
           <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#555', marginBottom: 16 }}>
             Logged • {formatTime(data.timestamp)}
+          </div>
+        )}
+
+        {/* Motivational / light humour line (decent, encouraging, inclusive) */}
+        {data.motivational && (
+          <div style={{
+            background: isEpic ? "rgba(255,187,0,0.07)" : "rgba(0,255,136,0.05)",
+            border: isEpic ? "1px solid rgba(255,187,0,0.25)" : "1px solid rgba(0,255,136,0.18)",
+            borderRadius: 8,
+            padding: "10px 13px",
+            margin: "8px 0 16px",
+            fontSize: 13,
+            color: isEpic ? "#ffddaa" : "#aaffcc",
+            fontStyle: "italic",
+            lineHeight: 1.35
+          }}>
+            “{data.motivational}”
           </div>
         )}
 
