@@ -1,7 +1,7 @@
 'use client'
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  CYCLEOPS — TACTICAL ENDURANCE EVENT (30 May 2026)          ║
-// ║  40 km | 4 Teams | 4 Games | LIVE Supabase only             ║
+// ║  CYCLEOPS — TACTICAL ENDURANCE CYCLING EVENT (13 Jun 2026)  ║
+// ║  40 km | 4 Teams | LIVE Supabase + Secure Server Routes     ║
 // ╚══════════════════════════════════════════════════════════════╝
 //
 // AMENDED SCORING (CONFIRMED):
@@ -46,10 +46,6 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const ADMIN_PIN    = "arunbhaskar6014"; // CHANGE THIS before the event
 const EVENT_DATE   = "13 Jun 2026";
-
-// IMPORTANT: bcryptjs has been FULLY REMOVED from this client file (page.jsx).
-// Password logic is now only in server routes: /api/login and /api/register.
-// This commit (57c5ee5) is the one you must redeploy on Vercel to fix the build.
 
 // ══════════════════════════════════════
 // TEAMS
