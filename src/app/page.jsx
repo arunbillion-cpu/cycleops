@@ -76,7 +76,7 @@ const CHECKPOINTS = [
 const MOTIVATIONAL_LINES = {
   checkin: [
     "Checkpoint secured. One more unknown removed from the route.",
-    "Arrival logged. The hills don't care — but you showed up anyway.",
+    "Arrival logged. The plains don't care — but you showed up anyway.",
     "Presence confirmed. Every pedal that got you here counts.",
   ],
   eye: [
