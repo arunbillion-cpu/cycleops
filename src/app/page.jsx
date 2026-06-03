@@ -39,7 +39,7 @@ const FINISH_QUESTIONNAIRE_QUESTIONS = [
 // See AMENDED_EVENT_PLAN.md for full details.
 //
 // CONFIG (see .env.local.example)
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "../lib/supabase/client";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -261,6 +261,92 @@ const DEFAULT_SCORING = {
   // Legacy game data removed during cleanup.
   // Current core scoring: Eye for Detail 30 + Jerrican 40 (first correct) + Rapid Fire 15 + Finish Q 5
 };
+
+// Pure top-level leaderboard computation (extracted from giant component to give minifier
+// a separate, smaller function scope). This reduces risk of TDZ for mangled single-letter
+// vars like 'T' (from 't' in .map((t,i) or 'total' etc) during aggressive prod minification
+// of the huge CycleOps component.
+function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], game2Status = {}, manualScores = {}, scoring = {}) {
+  try {
+    return TEAMS.map(team => {
+      const members = participants.filter(p=>p.teamId===team.id);
+      const teamCheckins = checkins.filter(c=>c.teamId===team.id);
+      const teamAnswers = gameAnswers.filter(a=>a.teamId===team.id);
+
+      // Arrival scores
+      let arrivalScore = 0;
+      CHECKPOINTS.slice(1).forEach(cp => {
+        const cpCheckins = checkins.filter(c=>c.cpId===cp.id);
+        const sorted = [...cpCheckins].sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+        const rank = sorted.findIndex(c=>c.teamId===team.id);
+        if (rank>=0) {
+          if (cp.id==="finish") {
+            arrivalScore += [scoring.arrival.finish.first,scoring.arrival.finish.second,scoring.arrival.finish.third,scoring.arrival.finish.fourth][rank]||0;
+          } else {
+            arrivalScore += [scoring.arrival.perCP.first,scoring.arrival.perCP.second,scoring.arrival.perCP.third,scoring.arrival.perCP.fourth][rank]||0;
+          }
+        }
+      });
+
+      // Eye for Detail (30 marks max)
+      const eyeAnswers = teamAnswers.filter(a => a.game === "eye_for_detail");
+      const eyeForDetailScore = eyeAnswers.length > 0 
+        ? Math.max(...eyeAnswers.map(a => a.score || 0)) 
+        : 0;
+
+      // JERRICAN 40-MARK "FIRST TO FINISH" LOGIC
+      const j = game2Status[team.id] || {};
+      let jerricanScore = 0;
+
+      if (j.finished && j.completed) {
+        // Base points for finishing
+        const base = 25;
+        jerricanScore = base;
+
+        // Bonus for being first (40 total for the winner)
+        if (j.rank === 1) {
+          jerricanScore = 40;
+        } else if (j.rank === 2) {
+          jerricanScore = 28;
+        } else if (j.rank === 3) {
+          jerricanScore = 18;
+        } else {
+          jerricanScore = 10;
+        }
+
+        // Apply penalties (5 pts each)
+        jerricanScore = Math.max(0, jerricanScore - (j.penaltyCount || 0) * 5);
+      }
+
+      // Manual scores (Rapid Fire + Finish Q)
+      const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0, eyeForDetailForced: false, finishQForced: false };
+      const manualScore = (m.rapidFire || 0) + (m.finishQ || 0);
+
+      const total = arrivalScore + eyeForDetailScore + jerricanScore + manualScore;
+
+      return {
+        ...team, members, checkins:teamCheckins,
+        scores:{ 
+          arrival: arrivalScore, 
+          eyeForDetail: eyeForDetailScore,
+          jerrican: jerricanScore,
+          manual: manualScore,
+          total 
+        },
+      };
+    }).sort((a,b)=>b.scores.total-a.scores.total).map((entry,idx)=>({...entry,rank:idx+1}));
+  } catch (e) {
+    console.warn("Leaderboard computation crashed (possible TDZ/minify or bad data); using safe fallback", e);
+    // Safe fallback so a single bad calc never crashes the whole app render
+    return TEAMS.map((team, i) => ({
+      ...team,
+      members: [],
+      checkins: [],
+      scores: { arrival: 0, eyeForDetail: 0, jerrican: 0, manual: 0, total: 0 },
+      rank: i + 1,
+    }));
+  }
+}
 
 // Game constants for Eye for Detail and Finish Questionnaire only.
 
@@ -604,102 +690,12 @@ export default function CycleOps() {
     }
   };
 
-  // ── Leaderboard calculation ──
-  const leaderboard = useCallback(() => {
-    try {
-      return TEAMS.map(team => {
-        const members = participants.filter(p=>p.teamId===team.id);
-        const teamCheckins = checkins.filter(c=>c.teamId===team.id);
-        const teamAnswers = gameAnswers.filter(a=>a.teamId===team.id);
-
-        // Arrival scores
-        let arrivalScore = 0;
-        CHECKPOINTS.slice(1).forEach(cp => {
-          const cpCheckins = checkins.filter(c=>c.cpId===cp.id);
-          const sorted = [...cpCheckins].sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
-          const rank = sorted.findIndex(c=>c.teamId===team.id);
-          if (rank>=0) {
-            if (cp.id==="finish") {
-              arrivalScore += [scoring.arrival.finish.first,scoring.arrival.finish.second,scoring.arrival.finish.third,scoring.arrival.finish.fourth][rank]||0;
-            } else {
-              arrivalScore += [scoring.arrival.perCP.first,scoring.arrival.perCP.second,scoring.arrival.perCP.third,scoring.arrival.perCP.fourth][rank]||0;
-            }
-          }
-        });
-
-        // Eye for Detail (30 marks max)
-        const eyeAnswers = teamAnswers.filter(a => a.game === "eye_for_detail");
-        const eyeForDetailScore = eyeAnswers.length > 0 
-          ? Math.max(...eyeAnswers.map(a => a.score || 0)) 
-          : 0;
-
-        // JERRICAN 40-MARK "FIRST TO FINISH" LOGIC
-        const j = game2Status[team.id] || {};
-        let jerricanScore = 0;
-
-        if (j.finished && j.completed) {
-          // Base points for finishing
-          const base = 25;
-          jerricanScore = base;
-
-          // Bonus for being first (40 total for the winner)
-          if (j.rank === 1) {
-            jerricanScore = 40;
-          } else if (j.rank === 2) {
-            jerricanScore = 28;
-          } else if (j.rank === 3) {
-            jerricanScore = 18;
-          } else {
-            jerricanScore = 10;
-          }
-
-          // Apply penalties (5 pts each)
-          jerricanScore = Math.max(0, jerricanScore - (j.penaltyCount || 0) * 5);
-        }
-
-        // Manual scores (Rapid Fire + Finish Q)
-        const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0, eyeForDetailForced: false, finishQForced: false };
-        const manualScore = (m.rapidFire || 0) + (m.finishQ || 0);
-
-        const total = arrivalScore + eyeForDetailScore + jerricanScore + manualScore;
-
-        return {
-          ...team, members, checkins:teamCheckins,
-          scores:{ 
-            arrival: arrivalScore, 
-            eyeForDetail: eyeForDetailScore,
-            jerrican: jerricanScore,
-            manual: manualScore,
-            total 
-          },
-        };
-      }).sort((a,b)=>b.scores.total-a.scores.total).map((t,i)=>({...t,rank:i+1}));
-    } catch (e) {
-      console.warn("Leaderboard computation crashed (possible TDZ/minify or bad data); using safe fallback", e);
-      // Safe fallback so a single bad calc (e.g. minified 'T' TDZ or empty initial data) never crashes the whole app render
-      return TEAMS.map((team, i) => ({
-        ...team,
-        members: [],
-        checkins: [],
-        scores: { arrival: 0, eyeForDetail: 0, jerrican: 0, manual: 0, total: 0 },
-        rank: i + 1,
-      }));
-    }
-  }, [participants, checkins, gameAnswers, game2Status, manualScores, scoring]);
-
-  // Defensive wrapper around lb computation (runs on every render including initial load)
-  // Prevents "unable to load" / white-screen crashes from TDZ or data issues in prod bundle.
-  let lb;
-  try {
-    lb = leaderboard();
-  } catch (e) {
-    console.warn("Outer leaderboard call failed; falling back", e);
-    lb = TEAMS.map((team, i) => ({
-      ...team, members: [], checkins: [],
-      scores: { arrival: 0, eyeForDetail: 0, jerrican: 0, manual: 0, total: 0 },
-      rank: i + 1,
-    }));
-  }
+  // ── Leaderboard calculation (memoized, using top-level pure function for better minification isolation) ──
+  // The top-level computeLeaderboard reduces TDZ risk for mangled vars (like 'T' from 't'/'total' in maps)
+  // by giving the minifier a smaller dedicated function scope instead of everything living inside the giant CycleOps component.
+  const lb = useMemo(() => computeLeaderboard(
+    participants, checkins, gameAnswers, game2Status, manualScores, scoring
+  ), [participants, checkins, gameAnswers, game2Status, manualScores, scoring]);
 
   // Load all event data from Supabase on startup (using official client)
   useEffect(() => {
@@ -933,7 +929,7 @@ export default function CycleOps() {
 
     const balancedAllP = [...participants, tempNewP]
       .sort((a, b) => a.age - b.age)
-      .map((p, i) => ({ ...p, teamId: teamIds[i % 4] }));
+      .map((entry, idx) => ({ ...entry, teamId: teamIds[idx % 4] }));
 
     const meForSend = balancedAllP.find(p => p.id === id);
     const finalTeamId = meForSend ? meForSend.teamId : teamIds[0];
@@ -1792,10 +1788,11 @@ function HydrationStopView({ activeCP, setView }) {
 // ══════════════════════════════════════
 function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView, setShowScanner, activeCP, setActiveCP, showToast, participants, manualScores, onRefreshData }) {
   if (!cyclist) { setView("home"); return null; }
-  const team = TEAMS.find(t=>t.id===cyclist.teamId);
+  const teamId = cyclist?.teamId;
+  const team = TEAMS.find(tm=>tm.id===teamId);
   const myCPs = checkins.filter(c=>c.cyclistId===cyclist.id);
   const myAnswers = gameAnswers.filter(a=>a.cyclistId===cyclist.id);
-  const teamData = lb.find(t=>t.id===cyclist.teamId);
+  const teamData = lb.find(tm=>tm.id===teamId);
 
   // Milestone activity rings calculations (fitness-watch style for CPs + games)
   const cpMilestones = ["cp1", "cp2", "cp3", "finish"];
@@ -1815,7 +1812,6 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
   const scoreProgress = Math.min(100, scoreVal);
 
   // Team readiness for Eye for Detail at CP2 (require ALL team members checked in before allowing game)
-  const teamId = cyclist?.teamId;
   const teamSize = (participants || []).filter(p => p.teamId === teamId).length;
   const checkedAtCp2 = checkins.filter(c => c.teamId === teamId && c.cpId === "cp2").length;
   const eyeForced = manualScores?.[teamId]?.eyeForDetailForced || false;
@@ -2458,7 +2454,7 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
 
   // Export CSV
   const exportCSV = () => {
-    const rows=[["Rank","Team","Total","Arrival","Game1","Game2","Game3","Game4","Game5","Members"],...lb.map(t=>[t.rank,t.name,t.scores.total,t.scores.arrival,t.scores.game1,t.scores.game2,t.scores.game3,t.scores.game4,t.scores.game5,t.members.length])];
+    const rows=[["Rank","Team","Total","Arrival","Game1","Game2","Game3","Game4","Game5","Members"],...lb.map(entry=>[entry.rank,entry.name,entry.scores.total,entry.scores.arrival,entry.scores.game1,entry.scores.game2,entry.scores.game3,entry.scores.game4,entry.scores.game5,entry.members.length])];
     const blob=new Blob([rows.map(r=>r.join(",")).join("\n")],{type:"text/csv"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="cycleops_results.csv";a.click();
     showToast("Exported!");
