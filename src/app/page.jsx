@@ -878,7 +878,7 @@ export default function CycleOps() {
     // No immediate setView here — the SuccessDialogue onDismiss handler will navigate contextually.
   };
 
-  // ── Register (Name + Team + Password only) ──
+  // ── Register (Name + Team + Password only) — server write must succeed before claiming success
   const handleRegister = async () => {
     if (!regForm.name || !regForm.age || !regForm.phone || !regForm.emergency || !regForm.password) {
       showToast("Please fill all fields including password", "error");
@@ -890,8 +890,9 @@ export default function CycleOps() {
     }
 
     const id = genId();
+    const plainPassword = regForm.password; // capture before any clears
 
-    // Balanced team assignment
+    // Balanced team assignment (computed before any server call)
     const teamIds = ["alpha", "bravo", "charlie", "delta"];
     const sorted = [...participants, { age: parseInt(regForm.age) }].sort((a, b) => a.age - b.age);
     const tempIdx = sorted.findIndex((p, i) => i === sorted.length - 1);
@@ -906,7 +907,35 @@ export default function CycleOps() {
       registeredAt: new Date().toISOString(),
     };
 
-    // Re-assign teams for balance
+    // Prepare the payload for server (will be used for both the insert and later local state if success)
+    const registerPayload = {
+      id: newP.id,
+      name: newP.name,
+      age: newP.age,
+      phone: newP.phone,
+      emergency: newP.emergency,
+      medical: newP.medical,
+      teamId: newP.teamId,
+      password: plainPassword, // plain — server will hash with bcrypt
+      registeredAt: newP.registeredAt,
+    };
+
+    // Write via secure server-side API route FIRST (using service_role key + bcrypt hash on server).
+    // Only update local state + show success UI if the hashed password was actually persisted.
+    const registerResponse = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(registerPayload),
+    });
+
+    if (!registerResponse.ok) {
+      const errorData = await registerResponse.json();
+      showDBError("registration", errorData);
+      return; // do not pretend registration succeeded; user can retry
+    }
+
+    // Server persisted the user (with hashed pw). Now safe to apply optimistic local state for immediate UI.
+    // Re-assign teams for balance (client-side view only; the teamId we sent is what is stored)
     const allP = [...participants, newP]
       .sort((a, b) => a.age - b.age)
       .map((p, i) => ({ ...p, teamId: teamIds[i % 4] }));
@@ -915,30 +944,8 @@ export default function CycleOps() {
     const me = allP.find(p => p.id === id);
     setCyclist(me);
 
-    // Clear form immediately after setting cyclist (Bug 2 fix)
+    // Clear form immediately after setting cyclist
     setRegForm({ name: "", age: "", phone: "", emergency: "", medical: false, password: "" });
-
-    // Write via secure server-side API route (using service_role key)
-    const registerResponse = await fetch('/api/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: me.id,
-        name: me.name,
-        age: me.age,
-        phone: me.phone,
-        emergency: me.emergency,
-        medical: me.medical,
-        teamId: me.teamId,
-        password: regForm.password, // Send plain password — server will hash it
-        registeredAt: me.registeredAt,
-      }),
-    });
-
-    if (!registerResponse.ok) {
-      const errorData = await registerResponse.json();
-      showDBError("registration", errorData);
-    }
 
     // Show success screen (no access code anymore)
     setView("regSuccess");
