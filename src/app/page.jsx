@@ -269,7 +269,7 @@ const DEFAULT_SCORING = {
 function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], game2Status = {}, manualScores = {}, scoring = {}) {
   try {
     return TEAMS.map(team => {
-      const members = participants.filter(p=>p.teamId===team.id);
+      const members = participants.filter(p=>p.teamId===team.id && !p.dropped);
       const teamCheckins = checkins.filter(c=>c.teamId===team.id);
       const teamAnswers = gameAnswers.filter(a=>a.teamId===team.id);
 
@@ -324,6 +324,27 @@ function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], 
 
       const total = arrivalScore + eyeForDetailScore + jerricanScore + manualScore;
 
+      // Team finish elapsed (max of members' effective race time at finish, accounting for SP start + CP2 pause)
+      const finishCheckins = checkins.filter(c => c.teamId === team.id && c.cpId === 'finish');
+      let teamFinishElapsed = null;
+      if (finishCheckins.length > 0) {
+        const tt = game2Status[team.id] || {};
+        const elapseds = finishCheckins.map(c => {
+          if (!tt.spStartTime) return 0;
+          const startMs = new Date(tt.spStartTime).getTime();
+          const checkMs = new Date(c.timestamp).getTime();
+          let pause = 0;
+          if (tt.cp2CheckinTime && tt.cp2ResumeTime) {
+            const ps = new Date(tt.cp2CheckinTime).getTime();
+            const pe = new Date(tt.cp2ResumeTime).getTime();
+            if (checkMs > pe) pause = pe - ps;
+            else if (checkMs > ps) pause = checkMs - ps;
+          }
+          return Math.max(0, Math.floor((checkMs - startMs - pause) / 1000));
+        });
+        teamFinishElapsed = Math.max(...elapseds);
+      }
+
       return {
         ...team, members, checkins:teamCheckins,
         scores:{ 
@@ -331,7 +352,8 @@ function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], 
           eyeForDetail: eyeForDetailScore,
           jerrican: jerricanScore,
           manual: manualScore,
-          total 
+          total,
+          finishElapsed: teamFinishElapsed 
         },
       };
     }).sort((a,b)=>b.scores.total-a.scores.total).map((entry,idx)=>({...entry,rank:idx+1}));
@@ -342,7 +364,7 @@ function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], 
       ...team,
       members: [],
       checkins: [],
-      scores: { arrival: 0, eyeForDetail: 0, jerrican: 0, manual: 0, total: 0 },
+      scores: { arrival: 0, eyeForDetail: 0, jerrican: 0, manual: 0, total: 0, finishElapsed: null },
       rank: i + 1,
     }));
   }
@@ -388,7 +410,7 @@ export default function CycleOps() {
   const [participants, setParticipants] = useState([]);
   const [checkins, setCheckins] = useState([]);
   const [gameAnswers, setGameAnswers] = useState([]); // all individual answers
-  const [game2Status, setGame2Status] = useState(   // per-team jerrican status (repurposed for new 40-mark game)
+  const [game2Status, setGame2Status] = useState(   // per-team jerrican status (repurposed for new 40-mark game) + overall race timing (sp start, cp2 pause/resume)
     TEAMS.reduce((a,t)=>({...a,[t.id]:{
       started: false,
       startTime: null,
@@ -396,7 +418,10 @@ export default function CycleOps() {
       finishTime: null,
       penaltyCount: 0,
       completed: false,
-      rank: null
+      rank: null,
+      spStartTime: null,
+      cp2CheckinTime: null,
+      cp2ResumeTime: null
     }}),{})
   );
   const [jerricanFinishOrder, setJerricanFinishOrder] = useState([]);  // order in which teams finish jerrican carry (for ranking)
@@ -521,7 +546,10 @@ export default function CycleOps() {
       finish_time: status.finishTime,
       penalty_count: status.penaltyCount || 0,
       completed: !!status.completed,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      sp_start_time: status.spStartTime || null,
+      cp2_checkin_time: status.cp2CheckinTime || null,
+      cp2_resume_time: status.cp2ResumeTime || null
     };
 
     // Write via secure server-side API route
@@ -541,6 +569,74 @@ export default function CycleOps() {
     }
   };
 
+  // Team start from SP (distorted starts controlled by admin)
+  const startTeamFromSP = async (teamId) => {
+    const now = new Date().toISOString();
+    setGame2Status(prev => {
+      const curr = prev[teamId] || {};
+      const updated = { ...curr, spStartTime: now };
+      saveJerricanToDB(teamId, updated);
+      return { ...prev, [teamId]: updated };
+    });
+    showToast(`Team ${teamId.toUpperCase()} GO from SP`);
+  };
+
+  // Resume team after CP2 questionnaire (admin manual control per team)
+  const resumeTeamAfterCP2 = async (teamId) => {
+    const now = new Date().toISOString();
+    setGame2Status(prev => {
+      const curr = prev[teamId] || {};
+      const updated = { ...curr, cp2ResumeTime: now };
+      saveJerricanToDB(teamId, updated);
+      return { ...prev, [teamId]: updated };
+    });
+    showToast(`Team ${teamId.toUpperCase()} resumed after CP2`);
+  };
+
+  // Timing helpers for elapsed (accounting for SP start + CP2 pause per team)
+  function getElapsedSeconds(checkinTime, teamId, teamData) {
+    const t = teamData?.[teamId] || {};
+    if (!t.spStartTime) return null;
+    const startMs = new Date(t.spStartTime).getTime();
+    const checkMs = new Date(checkinTime).getTime();
+    let pauseMs = 0;
+    if (t.cp2CheckinTime && t.cp2ResumeTime) {
+      const pStart = new Date(t.cp2CheckinTime).getTime();
+      const pEnd = new Date(t.cp2ResumeTime).getTime();
+      if (checkMs > pEnd) {
+        pauseMs = pEnd - pStart;
+      } else if (checkMs > pStart) {
+        pauseMs = checkMs - pStart;
+      }
+    }
+    return Math.max(0, Math.floor((checkMs - startMs - pauseMs) / 1000));
+  }
+
+  function formatElapsed(secs) {
+    if (secs == null || isNaN(secs)) return '--:--';
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  // Dropout: admin removes rider from all calcs, timings, team sizes, leaderboards
+  const markDropped = async (cyclistId, drop = true) => {
+    setParticipants(prev => prev.map(p => p.id === cyclistId ? { ...p, dropped: drop } : p));
+    // clean local checkins and answers for this rider
+    setCheckins(prev => prev.filter(c => c.cyclistId !== cyclistId));
+    setGameAnswers(prev => prev.filter(a => a.cyclistId !== cyclistId));
+    try {
+      await fetch('/api/mark-dropped', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cyclistId, dropped: drop }),
+      });
+      showToast(drop ? 'Rider DROPPED — stats/timings removed, teams reassessed' : 'Rider restored');
+    } catch (e) {
+      showToast('Dropout saved locally only (DB update may require column)', 'warning');
+    }
+  };
+
   // ============================================
   // DATA NORMALIZATION HELPERS (snake_case → camelCase)
   // ============================================
@@ -551,6 +647,7 @@ export default function CycleOps() {
       ...safeRow,
       teamId: safeRow.team_id ?? safeRow.teamId,
       registeredAt: safeRow.registered_at ?? safeRow.registeredAt,
+      dropped: !!safeRow.dropped,
     };
   }
 
@@ -616,7 +713,7 @@ export default function CycleOps() {
       // 1. Load participants (exclude password hash for security - never send hashes to client)
       const { data: participantsData, error: pErr } = await supabase
         .from("participants")
-        .select("id, name, age, phone, emergency, medical, team_id, registered_at")
+        .select("id, name, age, phone, emergency, medical, team_id, registered_at, dropped")
         .order("registered_at", { ascending: true });
 
       if (!pErr && participantsData) {
@@ -659,6 +756,9 @@ export default function CycleOps() {
               finishTime: row.finish_time,
               penaltyCount: row.penalty_count || 0,
               completed: !!row.completed,
+              spStartTime: row.sp_start_time || null,
+              cp2CheckinTime: row.cp2_checkin_time || null,
+              cp2ResumeTime: row.cp2_resume_time || null,
             };
           }
         });
@@ -871,9 +971,20 @@ export default function CycleOps() {
       showToast(`Checked in locally at ${cp?.name}. Database save failed — will sync later.`, "warning");
     }
 
+    // For CP2: record checkin time for team pause (first arrival for team starts the pause)
+    if (activeCP === 'cp2') {
+      setGame2Status(prev => {
+        const curr = prev[cyclist.teamId] || {};
+        if (curr.cp2CheckinTime) return prev; // keep the first checkin time for the team
+        const updated = { ...curr, cp2CheckinTime: checkin.timestamp };
+        saveJerricanToDB(cyclist.teamId, updated);
+        return { ...prev, [cyclist.teamId]: updated };
+      });
+    }
+
     // Compute if team is ready for game (using the just-added checkin for this user)
     const updatedCheckins = [...checkins, checkin];
-    const localTeamSize = (participants || []).filter(p => p.teamId === cyclist.teamId).length;
+    const localTeamSize = (participants || []).filter(p => p.teamId === cyclist.teamId && !p.dropped).length;
     const localChecked = updatedCheckins.filter(c => c.teamId === cyclist.teamId && c.cpId === activeCP).length;
     const localCanStartEye = activeCP === 'cp2' ? (localTeamSize > 0 && localChecked >= localTeamSize) : false;
 
@@ -1156,6 +1267,9 @@ export default function CycleOps() {
           jerricanFinishOrder={jerricanFinishOrder}
           setJerricanFinishOrder={setJerricanFinishOrder}
           saveJerricanToDB={saveJerricanToDB}
+          markDropped={markDropped}
+          startTeamFromSP={startTeamFromSP}
+          resumeTeamAfterCP2={resumeTeamAfterCP2}
         />}
         {view==="qrcodes"    && adminAuth && <QRCodesView setView={setView} />}
         {view==="scoringGuide" && <ScoringGuideView setView={setView} />}
@@ -1399,7 +1513,7 @@ function EyeForDetailView({ cyclist, gameAnswers, setGameAnswers, setView, showT
   const teamAnswers = gameAnswers.find(a => a.teamId === cyclist?.teamId && a.game === "eye_for_detail");
 
   // Gate: only allow if all team has checked in at CP2 (or already submitted)
-  const teamSize = (participants || []).filter(p => p.teamId === cyclist?.teamId).length;
+  const teamSize = (participants || []).filter(p => p.teamId === cyclist?.teamId && !p.dropped).length;
   const checkedAtCp2 = (checkins || []).filter(c => c.teamId === cyclist?.teamId && c.cpId === 'cp2').length;
   const eyeForced = manualScores?.[cyclist?.teamId]?.eyeForDetailForced || false;
   const allTeamCheckedForEye = (teamSize === 0 || checkedAtCp2 >= teamSize) || eyeForced;
@@ -1812,7 +1926,7 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
   const scoreProgress = Math.min(100, scoreVal);
 
   // Team readiness for Eye for Detail at CP2 (require ALL team members checked in before allowing game)
-  const teamSize = (participants || []).filter(p => p.teamId === teamId).length;
+  const teamSize = (participants || []).filter(p => p.teamId === teamId && !p.dropped).length;
   const checkedAtCp2 = checkins.filter(c => c.teamId === teamId && c.cpId === "cp2").length;
   const eyeForced = manualScores?.[teamId]?.eyeForDetailForced || false;
   const allTeamAtCp2 = (teamSize > 0 && checkedAtCp2 >= teamSize) || eyeForced;
@@ -1865,6 +1979,17 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
           Fill the rings. Own the event.
         </div>
       </div>
+
+      {/* Flash final timings on dashboard (effective elapsed at finish, with CP2 pause accounted) */}
+      {hasFinishCheckin && (
+        <div style={{...CARD, marginBottom:12, textAlign:'center', background:'#0a1f0a', borderColor:'#00ff8833'}}>
+          <div style={{fontSize:11, color:'#00ff88', marginBottom:2}}>YOUR FINISH ELAPSED (race time)</div>
+          <div style={{fontFamily:'monospace', fontSize:26, color:'#fff', fontWeight:'bold'}}>
+            {formatElapsed( getElapsedSeconds( myCPs.find(c=>c.cpId==='finish')?.timestamp , cyclist.teamId, game2Status ) )}
+          </div>
+          <div style={{fontSize:9, color:'#555'}}>CP1 / CP3 / Finish timings recorded. CP2 pause not counted.</div>
+        </div>
+      )}
 
       {/* Scan button */}
       <button onClick={()=>setShowScanner(true)} style={{...BTN_PRIMARY,width:"100%",marginBottom:12}}>
@@ -1998,7 +2123,7 @@ function CPCheckinView({ activeCP, cyclist, checkins, onCheckin, setView, partic
   const [time] = useState(new Date().toLocaleTimeString());
 
   // Team check-in gate for games (only relevant for cp2 Eye for Detail)
-  const teamSize = (participants || []).filter(p => p.teamId === cyclist?.teamId).length;
+  const teamSize = (participants || []).filter(p => p.teamId === cyclist?.teamId && !p.dropped).length;
   const checkedAtCp = checkins.filter(c => c.teamId === cyclist?.teamId && c.cpId === activeCP).length;
   const eyeForced = manualScores?.[cyclist?.teamId]?.eyeForDetailForced || false;
   const allTeamChecked = (teamSize > 0 && checkedAtCp >= teamSize) || (activeCP === 'cp2' && eyeForced);
@@ -2090,6 +2215,11 @@ function LeaderboardView({ lb, scoring, setView }) {
               </div>
             ))}
           </div>
+          {team.scores.finishElapsed != null && (
+            <div style={{fontSize:10, color:"#00ff88", marginTop:6, fontFamily:"monospace", textAlign:"center"}}>
+              TEAM FINISH ELAPSED: {Math.floor(team.scores.finishElapsed/60)}:{(team.scores.finishElapsed%60).toString().padStart(2,'0')} (last rider effective)
+            </div>
+          )}
         </div>
       ))}
       <button onClick={()=>setView("scoringGuide")} style={{...BTN_SEC,width:"100%",marginBottom:8}}>📋 VIEW SCORING GUIDE</button>
@@ -2425,7 +2555,7 @@ function AdminAuthView({ adminPin, setAdminPin, onAuth, setView }) {
 // ══════════════════════════════════════
 // ADMIN DASHBOARD
 // ══════════════════════════════════════
-function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, manualScores, setManualScores, scoring, setScoring, setView, showToast, onRefreshData, onAdminLogout, lastDbSync, setLastDbSync, manualScoresSaving, manualScoresLastSaved, jerricanFinishOrder, setJerricanFinishOrder, saveJerricanToDB }) {
+function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, manualScores, setManualScores, scoring, setScoring, setView, showToast, onRefreshData, onAdminLogout, lastDbSync, setLastDbSync, manualScoresSaving, manualScoresLastSaved, jerricanFinishOrder, setJerricanFinishOrder, saveJerricanToDB, markDropped, startTeamFromSP, resumeTeamAfterCP2 }) {
   const [tab, setTab] = useState("overview");
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -2622,6 +2752,20 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
                       </button>
                     )}
                   </div>
+
+                  {/* SP START and CP2 RESUME for overall race timings (distorted starts + pause at questionnaire not counted in race time) */}
+                  <div style={{marginTop:8, paddingTop:8, borderTop:'1px solid #222', fontSize:10, color:'#888'}}>
+                    <div style={{color:team.color, marginBottom:2, fontSize:11}}>RACE START / CP2 PAUSE</div>
+                    <div>SP Start: {j.spStartTime ? new Date(j.spStartTime).toLocaleTimeString() : '—'}</div>
+                    {!j.spStartTime && (
+                      <button onClick={() => startTeamFromSP(team.id)} style={{background:'#002200', color:'#00ff88', fontSize:9, padding:'1px 4px', border:'1px solid #00ff88', marginTop:1, cursor:'pointer'}}>START TEAM FROM SP</button>
+                    )}
+                    <div style={{marginTop:2}}>CP2 Checkin: {j.cp2CheckinTime ? new Date(j.cp2CheckinTime).toLocaleTimeString() : '—'}</div>
+                    <div>CP2 Resume: {j.cp2ResumeTime ? new Date(j.cp2ResumeTime).toLocaleTimeString() : '—'}</div>
+                    {checkins.some(c=>c.teamId===team.id && c.cpId==='cp2') && !j.cp2ResumeTime && j.spStartTime && (
+                      <button onClick={() => resumeTeamAfterCP2(team.id)} style={{background:'#220000', color:'#ffaa00', fontSize:9, padding:'1px 4px', border:'1px solid #ffaa00', marginTop:1, cursor:'pointer'}}>RESUME TEAM (after Q)</button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -2804,6 +2948,25 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
                       <div style={{fontSize:10,color:"#444",marginTop:2}}>{formatTime(p.registeredAt)}</div>
                     </div>
                   </div>
+                  {!p.dropped ? (
+                    <button 
+                      onClick={() => markDropped(p.id, true)} 
+                      style={{background:'#3a0000',color:'#ff8888',fontSize:9,padding:'1px 5px',border:'1px solid #660000',borderRadius:3,cursor:'pointer',marginTop:4}}
+                    >
+                      DROP OUT
+                    </button>
+                  ) : (
+                    <span style={{color:'#ff6666',fontSize:9}}>DROPPED (excluded from timings/standings)</span>
+                  )}
+                  {/* individual timings with elapsed (paused at CP2) */}
+                  {pCheckins.length > 0 && (
+                    <div style={{fontSize:9,color:'#666',marginTop:4,fontFamily:'monospace'}}>
+                      {pCheckins.map(c => {
+                        const el = getElapsedSeconds(c.timestamp, p.teamId, game2Status);
+                        return <div key={c.cpId}>{c.cpId.toUpperCase()}: {formatTime(c.timestamp)} {el != null ? `(${formatElapsed(el)})` : ''}</div>;
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { team_id, start_time, finish_time, penalty_count, completed, updated_at } = body;
+    const { team_id, start_time, finish_time, penalty_count, completed, updated_at, sp_start_time, cp2_checkin_time, cp2_resume_time } = body;
 
     if (!team_id) {
       return NextResponse.json({ error: 'team_id is required' }, { status: 400 });
@@ -22,6 +22,9 @@ export async function POST(request: NextRequest) {
       penalty_count: penalty_count ?? 0,
       completed: !!completed,
       updated_at: updated_at || new Date().toISOString(),
+      sp_start_time: sp_start_time || null,
+      cp2_checkin_time: cp2_checkin_time || null,
+      cp2_resume_time: cp2_resume_time || null,
     };
 
     const { error } = await supabaseAdmin
