@@ -606,76 +606,100 @@ export default function CycleOps() {
 
   // ── Leaderboard calculation ──
   const leaderboard = useCallback(() => {
-    return TEAMS.map(team => {
-      const members = participants.filter(p=>p.teamId===team.id);
-      const teamCheckins = checkins.filter(c=>c.teamId===team.id);
-      const teamAnswers = gameAnswers.filter(a=>a.teamId===team.id);
+    try {
+      return TEAMS.map(team => {
+        const members = participants.filter(p=>p.teamId===team.id);
+        const teamCheckins = checkins.filter(c=>c.teamId===team.id);
+        const teamAnswers = gameAnswers.filter(a=>a.teamId===team.id);
 
-      // Arrival scores
-      let arrivalScore = 0;
-      CHECKPOINTS.slice(1).forEach(cp => {
-        const cpCheckins = checkins.filter(c=>c.cpId===cp.id);
-        const sorted = [...cpCheckins].sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
-        const rank = sorted.findIndex(c=>c.teamId===team.id);
-        if (rank>=0) {
-          if (cp.id==="finish") {
-            arrivalScore += [scoring.arrival.finish.first,scoring.arrival.finish.second,scoring.arrival.finish.third,scoring.arrival.finish.fourth][rank]||0;
-          } else {
-            arrivalScore += [scoring.arrival.perCP.first,scoring.arrival.perCP.second,scoring.arrival.perCP.third,scoring.arrival.perCP.fourth][rank]||0;
+        // Arrival scores
+        let arrivalScore = 0;
+        CHECKPOINTS.slice(1).forEach(cp => {
+          const cpCheckins = checkins.filter(c=>c.cpId===cp.id);
+          const sorted = [...cpCheckins].sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+          const rank = sorted.findIndex(c=>c.teamId===team.id);
+          if (rank>=0) {
+            if (cp.id==="finish") {
+              arrivalScore += [scoring.arrival.finish.first,scoring.arrival.finish.second,scoring.arrival.finish.third,scoring.arrival.finish.fourth][rank]||0;
+            } else {
+              arrivalScore += [scoring.arrival.perCP.first,scoring.arrival.perCP.second,scoring.arrival.perCP.third,scoring.arrival.perCP.fourth][rank]||0;
+            }
           }
+        });
+
+        // Eye for Detail (30 marks max)
+        const eyeAnswers = teamAnswers.filter(a => a.game === "eye_for_detail");
+        const eyeForDetailScore = eyeAnswers.length > 0 
+          ? Math.max(...eyeAnswers.map(a => a.score || 0)) 
+          : 0;
+
+        // JERRICAN 40-MARK "FIRST TO FINISH" LOGIC
+        const j = game2Status[team.id] || {};
+        let jerricanScore = 0;
+
+        if (j.finished && j.completed) {
+          // Base points for finishing
+          const base = 25;
+          jerricanScore = base;
+
+          // Bonus for being first (40 total for the winner)
+          if (j.rank === 1) {
+            jerricanScore = 40;
+          } else if (j.rank === 2) {
+            jerricanScore = 28;
+          } else if (j.rank === 3) {
+            jerricanScore = 18;
+          } else {
+            jerricanScore = 10;
+          }
+
+          // Apply penalties (5 pts each)
+          jerricanScore = Math.max(0, jerricanScore - (j.penaltyCount || 0) * 5);
         }
-      });
 
-      // Eye for Detail (30 marks max)
-      const eyeAnswers = teamAnswers.filter(a => a.game === "eye_for_detail");
-      const eyeForDetailScore = eyeAnswers.length > 0 
-        ? Math.max(...eyeAnswers.map(a => a.score || 0)) 
-        : 0;
+        // Manual scores (Rapid Fire + Finish Q)
+        const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0, eyeForDetailForced: false, finishQForced: false };
+        const manualScore = (m.rapidFire || 0) + (m.finishQ || 0);
 
-      // JERRICAN 40-MARK "FIRST TO FINISH" LOGIC
-      const j = game2Status[team.id] || {};
-      let jerricanScore = 0;
+        const total = arrivalScore + eyeForDetailScore + jerricanScore + manualScore;
 
-      if (j.finished && j.completed) {
-        // Base points for finishing
-        const base = 25;
-        jerricanScore = base;
-
-        // Bonus for being first (40 total for the winner)
-        if (j.rank === 1) {
-          jerricanScore = 40;
-        } else if (j.rank === 2) {
-          jerricanScore = 28;
-        } else if (j.rank === 3) {
-          jerricanScore = 18;
-        } else {
-          jerricanScore = 10;
-        }
-
-        // Apply penalties (5 pts each)
-        jerricanScore = Math.max(0, jerricanScore - (j.penaltyCount || 0) * 5);
-      }
-
-      // Manual scores (Rapid Fire + Finish Q)
-      const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0, eyeForDetailForced: false, finishQForced: false };
-      const manualScore = (m.rapidFire || 0) + (m.finishQ || 0);
-
-      const total = arrivalScore + eyeForDetailScore + jerricanScore + manualScore;
-
-      return {
-        ...team, members, checkins:teamCheckins,
-        scores:{ 
-          arrival: arrivalScore, 
-          eyeForDetail: eyeForDetailScore,
-          jerrican: jerricanScore,
-          manual: manualScore,
-          total 
-        },
-      };
-    }).sort((a,b)=>b.scores.total-a.scores.total).map((t,i)=>({...t,rank:i+1}));
+        return {
+          ...team, members, checkins:teamCheckins,
+          scores:{ 
+            arrival: arrivalScore, 
+            eyeForDetail: eyeForDetailScore,
+            jerrican: jerricanScore,
+            manual: manualScore,
+            total 
+          },
+        };
+      }).sort((a,b)=>b.scores.total-a.scores.total).map((t,i)=>({...t,rank:i+1}));
+    } catch (e) {
+      console.warn("Leaderboard computation crashed (possible TDZ/minify or bad data); using safe fallback", e);
+      // Safe fallback so a single bad calc (e.g. minified 'T' TDZ or empty initial data) never crashes the whole app render
+      return TEAMS.map((team, i) => ({
+        ...team,
+        members: [],
+        checkins: [],
+        scores: { arrival: 0, eyeForDetail: 0, jerrican: 0, manual: 0, total: 0 },
+        rank: i + 1,
+      }));
+    }
   }, [participants, checkins, gameAnswers, game2Status, manualScores, scoring]);
 
-  const lb = leaderboard();
+  // Defensive wrapper around lb computation (runs on every render including initial load)
+  // Prevents "unable to load" / white-screen crashes from TDZ or data issues in prod bundle.
+  let lb;
+  try {
+    lb = leaderboard();
+  } catch (e) {
+    console.warn("Outer leaderboard call failed; falling back", e);
+    lb = TEAMS.map((team, i) => ({
+      ...team, members: [], checkins: [],
+      scores: { arrival: 0, eyeForDetail: 0, jerrican: 0, manual: 0, total: 0 },
+      rank: i + 1,
+    }));
+  }
 
   // Load all event data from Supabase on startup (using official client)
   useEffect(() => {
@@ -892,32 +916,39 @@ export default function CycleOps() {
     const id = genId();
     const plainPassword = regForm.password; // capture before any clears
 
-    // Balanced team assignment (computed before any server call)
+    // ── Team balancing: compute FINAL balanced assignments (including the new user)
+    // BEFORE sending to server. This ensures the teamId persisted in DB matches
+    // what the local UI will use (fixes inconsistency introduced in recent register change).
+    // The pre-existing rebalance sorts all by age and cycles teams alpha/bravo/charlie/delta.
+    // (The old tempIdx/assignedTeam was a flawed prediction that didn't match the final map.)
     const teamIds = ["alpha", "bravo", "charlie", "delta"];
-    const sorted = [...participants, { age: parseInt(regForm.age) }].sort((a, b) => a.age - b.age);
-    const tempIdx = sorted.findIndex((p, i) => i === sorted.length - 1);
-    const assignedTeam = teamIds[tempIdx % 4];
-
     const { password: _dontStorePlain, ...safeReg } = regForm;
-    const newP = {
+    const tempNewP = {
       id,
       ...safeReg,
       age: parseInt(regForm.age),
-      teamId: assignedTeam,
+      teamId: "placeholder", // will be overridden by final balance
       registeredAt: new Date().toISOString(),
     };
 
-    // Prepare the payload for server (will be used for both the insert and later local state if success)
+    const balancedAllP = [...participants, tempNewP]
+      .sort((a, b) => a.age - b.age)
+      .map((p, i) => ({ ...p, teamId: teamIds[i % 4] }));
+
+    const meForSend = balancedAllP.find(p => p.id === id);
+    const finalTeamId = meForSend ? meForSend.teamId : teamIds[0];
+
+    // Prepare payload with the *final* correct teamId so DB and local state agree
     const registerPayload = {
-      id: newP.id,
-      name: newP.name,
-      age: newP.age,
-      phone: newP.phone,
-      emergency: newP.emergency,
-      medical: newP.medical,
-      teamId: newP.teamId,
+      id,
+      name: tempNewP.name,
+      age: tempNewP.age,
+      phone: tempNewP.phone,
+      emergency: tempNewP.emergency,
+      medical: tempNewP.medical,
+      teamId: finalTeamId,
       password: plainPassword, // plain — server will hash with bcrypt
-      registeredAt: newP.registeredAt,
+      registeredAt: tempNewP.registeredAt,
     };
 
     // Write via secure server-side API route FIRST (using service_role key + bcrypt hash on server).
@@ -934,14 +965,9 @@ export default function CycleOps() {
       return; // do not pretend registration succeeded; user can retry
     }
 
-    // Server persisted the user (with hashed pw). Now safe to apply optimistic local state for immediate UI.
-    // Re-assign teams for balance (client-side view only; the teamId we sent is what is stored)
-    const allP = [...participants, newP]
-      .sort((a, b) => a.age - b.age)
-      .map((p, i) => ({ ...p, teamId: teamIds[i % 4] }));
-
-    setParticipants(allP);
-    const me = allP.find(p => p.id === id);
+    // Server persisted the user (with hashed pw + correct team). Now apply the precomputed balanced state.
+    setParticipants(balancedAllP);
+    const me = meForSend;
     setCyclist(me);
 
     // Clear form immediately after setting cyclist
