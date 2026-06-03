@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { team_id, rapid_fire, finish_questionnaire, updated_at } = body;
+    const { team_id, rapid_fire, finish_questionnaire, eye_for_detail_forced, finish_q_forced, updated_at } = body;
 
     if (!team_id) {
       return NextResponse.json({ error: 'team_id is required' }, { status: 400 });
@@ -19,6 +19,8 @@ export async function POST(request: NextRequest) {
       team_id,
       rapid_fire: rapid_fire ?? 0,
       finish_questionnaire: finish_questionnaire ?? 0,
+      eye_for_detail_forced: eye_for_detail_forced ?? false,
+      finish_q_forced: finish_q_forced ?? false,
       updated_at: updated_at || new Date().toISOString(),
     };
 

@@ -318,7 +318,7 @@ export default function CycleOps() {
 
   // Proper separate manual scores
   const [manualScores, setManualScores] = useState(
-    TEAMS.reduce((a, t) => ({ ...a, [t.id]: { rapidFire: 0, finishQ: 0 } }), {})
+    TEAMS.reduce((a, t) => ({ ...a, [t.id]: { rapidFire: 0, finishQ: 0, eyeForDetailForced: false, finishQForced: false } }), {})
   );
   const [scoring, setScoring] = useState(DEFAULT_SCORING);
 
@@ -375,7 +375,13 @@ export default function CycleOps() {
     let target = targetOverride;
     if (!target) {
       if (d.type === 'checkin') {
-        target = (d.cpId === 'cp2' ? 'eyeForDetail' : d.cpId === 'finish' ? 'finishQuestionnaire' : 'dashboard');
+        if (d.cpId === 'cp2') {
+          target = (d.canStartEye ? 'eyeForDetail' : 'dashboard');
+        } else if (d.cpId === 'finish') {
+          target = 'finishQuestionnaire';
+        } else {
+          target = 'dashboard';
+        }
       } else {
         target = 'dashboard';
       }
@@ -396,6 +402,8 @@ export default function CycleOps() {
       team_id: teamId,
       rapid_fire: scores.rapidFire ?? 0,
       finish_questionnaire: scores.finishQ ?? 0,
+      eye_for_detail_forced: scores.eyeForDetailForced ?? false,
+      finish_q_forced: scores.finishQForced ?? false,
       updated_at: new Date().toISOString(),
     };
 
@@ -582,6 +590,8 @@ export default function CycleOps() {
             newManual[row.team_id] = {
               rapidFire: row.rapid_fire ?? 0,
               finishQ: row.finish_questionnaire ?? 0,
+              eyeForDetailForced: row.eye_for_detail_forced ?? false,
+              finishQForced: row.finish_q_forced ?? false,
             };
           }
         });
@@ -646,7 +656,7 @@ export default function CycleOps() {
       }
 
       // Manual scores (Rapid Fire + Finish Q)
-      const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0 };
+      const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0, eyeForDetailForced: false, finishQForced: false };
       const manualScore = (m.rapidFire || 0) + (m.finishQ || 0);
 
       const total = arrivalScore + eyeForDetailScore + jerricanScore + manualScore;
@@ -714,7 +724,7 @@ export default function CycleOps() {
   useEffect(() => {
     // Only save if we have real data
     const hasData = Object.values(manualScores).some(
-      (m) => (m?.rapidFire ?? 0) > 0 || (m?.finishQ ?? 0) > 0
+      (m) => (m?.rapidFire ?? 0) > 0 || (m?.finishQ ?? 0) > 0 || m?.eyeForDetailForced || m?.finishQForced
     );
     if (!hasData) return;
 
@@ -840,6 +850,12 @@ export default function CycleOps() {
       showToast(`Checked in locally at ${cp?.name}. Database save failed — will sync later.`, "warning");
     }
 
+    // Compute if team is ready for game (using the just-added checkin for this user)
+    const updatedCheckins = [...checkins, checkin];
+    const localTeamSize = (participants || []).filter(p => p.teamId === cyclist.teamId).length;
+    const localChecked = updatedCheckins.filter(c => c.teamId === cyclist.teamId && c.cpId === activeCP).length;
+    const localCanStartEye = activeCP === 'cp2' ? (localTeamSize > 0 && localChecked >= localTeamSize) : false;
+
     // Show interactive celebratory dialogue (makes check-ins feel alive per user request)
     // User then chooses next step from the dialogue (start game / dashboard)
     const checkinDialogue = {
@@ -854,6 +870,7 @@ export default function CycleOps() {
         ? 'Finish line crossed. Complete your individual debrief questionnaire.'
         : 'Arrival logged. Hydrate, rest briefly, and continue the route safely.',
       motivational: pickMotivational('checkin'),
+      canStartEye: localCanStartEye,
     };
     setSuccessDialogue(checkinDialogue);
     successDialogueRef.current = checkinDialogue;
@@ -1078,9 +1095,9 @@ export default function CycleOps() {
           pendingAction={pendingAction}
           setPendingAction={setPendingAction}
         />}
-        {view==="dashboard"  && <DashboardView cyclist={cyclist} setCyclist={setCyclist} lb={lb} checkins={checkins} gameAnswers={gameAnswers} setView={setView} setShowScanner={setShowScanner} activeCP={activeCP} setActiveCP={setActiveCP} showToast={showToast} />}
-        {view==="cpCheckin"  && <CPCheckinView activeCP={activeCP} cyclist={cyclist} checkins={checkins} onCheckin={handleCPCheckin} setView={setView} />}
-        {view==="eyeForDetail" && <EyeForDetailView cyclist={cyclist} gameAnswers={gameAnswers} setGameAnswers={setGameAnswers} setView={setView} showToast={showToast} />}
+        {view==="dashboard"  && <DashboardView cyclist={cyclist} setCyclist={setCyclist} lb={lb} checkins={checkins} gameAnswers={gameAnswers} setView={setView} setShowScanner={setShowScanner} activeCP={activeCP} setActiveCP={setActiveCP} showToast={showToast} participants={participants} manualScores={manualScores} onRefreshData={loadEventDataFromDB} />}
+        {view==="cpCheckin"  && <CPCheckinView activeCP={activeCP} cyclist={cyclist} checkins={checkins} onCheckin={handleCPCheckin} setView={setView} participants={participants} manualScores={manualScores} />}
+        {view==="eyeForDetail" && <EyeForDetailView cyclist={cyclist} gameAnswers={gameAnswers} setGameAnswers={setGameAnswers} setView={setView} showToast={showToast} participants={participants} checkins={checkins} manualScores={manualScores} />}
         {view==="leaderboard"&& <LeaderboardView lb={lb} scoring={scoring} setView={setView} />}
         {view==="adminAuth"  && <AdminAuthView adminPin={adminPin} setAdminPin={setAdminPin} onAuth={()=>{if(adminPin===ADMIN_PIN){setAdminAuth(true);setView("admin");showToast("Admin access granted");}else showToast("Wrong PIN","error");}} setView={setView} />}
         {view==="admin"      && adminAuth && <AdminView 
@@ -1107,6 +1124,7 @@ export default function CycleOps() {
           showToast={showToast} 
           gameAnswers={gameAnswers}
           setGameAnswers={setGameAnswers}
+          manualScores={manualScores}
         />}
         {view==="hydrationStop" && <HydrationStopView activeCP={activeCP} setView={setView} />}
       </div>
@@ -1331,13 +1349,35 @@ function RegSuccessView({ setView, justRegistered, setJustRegistered, pendingAct
 // ══════════════════════════════════════
 // EYE FOR DETAIL VIEW (CP2) — 15 Questions, 30 marks
 // ══════════════════════════════════════
-function EyeForDetailView({ cyclist, gameAnswers, setGameAnswers, setView, showToast }) {
+function EyeForDetailView({ cyclist, gameAnswers, setGameAnswers, setView, showToast, participants, checkins, manualScores }) {
   const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [score, setScore] = useState(0);
 
   const teamAnswers = gameAnswers.find(a => a.teamId === cyclist?.teamId && a.game === "eye_for_detail");
+
+  // Gate: only allow if all team has checked in at CP2 (or already submitted)
+  const teamSize = (participants || []).filter(p => p.teamId === cyclist?.teamId).length;
+  const checkedAtCp2 = (checkins || []).filter(c => c.teamId === cyclist?.teamId && c.cpId === 'cp2').length;
+  const eyeForced = manualScores?.[cyclist?.teamId]?.eyeForDetailForced || false;
+  const allTeamCheckedForEye = (teamSize === 0 || checkedAtCp2 >= teamSize) || eyeForced;
+
+  if (!allTeamCheckedForEye && !teamAnswers && !submitted) {
+    return (
+      <div className="fadeUp" style={{padding:"0 16px"}}>
+        <PageHeader icon="👁️" title="EYE FOR DETAIL" sub="CP2 • 30 marks" />
+        <div style={{...CARD, textAlign:"center", background:"#2a1a0a", borderColor:"#ffbb00", padding:20}}>
+          <div style={{fontSize:18, color:"#ffbb00", marginBottom:10}}>⏳ Team not complete</div>
+          <div style={{fontSize:13, color:"#ccc", lineHeight:1.5}}>
+            All your team mates haven't checked in at CP2 yet.<br />
+            Once they do, you may attempt the Questionnaire from your Dashboard.
+          </div>
+        </div>
+        <PBtn onClick={() => setView("dashboard")} icon="🏠" label="BACK TO DASHBOARD" />
+      </div>
+    );
+  }
 
   const handleAnswer = (qId, value) => {
     setAnswers(prev => ({ ...prev, [qId]: value }));
@@ -1511,7 +1551,7 @@ function EyeForDetailView({ cyclist, gameAnswers, setGameAnswers, setView, showT
 // ══════════════════════════════════════
 // FINISH POINT QUESTIONNAIRE (3 questions - Admin manually marks 0-5)
 // ══════════════════════════════════════
-function FinishQuestionnaireView({ cyclist, setView, showToast, gameAnswers, setGameAnswers }) {
+function FinishQuestionnaireView({ cyclist, setView, showToast, gameAnswers, setGameAnswers, manualScores }) {
   const [answers, setAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -1705,7 +1745,7 @@ function HydrationStopView({ activeCP, setView }) {
 // ══════════════════════════════════════
 // CYCLIST DASHBOARD
 // ══════════════════════════════════════
-function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView, setShowScanner, activeCP, setActiveCP, showToast }) {
+function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView, setShowScanner, activeCP, setActiveCP, showToast, participants, manualScores, onRefreshData }) {
   if (!cyclist) { setView("home"); return null; }
   const team = TEAMS.find(t=>t.id===cyclist.teamId);
   const myCPs = checkins.filter(c=>c.cyclistId===cyclist.id);
@@ -1722,8 +1762,19 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
   const gamesDone = (hasEye ? 1 : 0) + (hasFinishQ ? 1 : 0);
   const gamesProgress = Math.round((gamesDone / 2) * 100);
 
+  const finishForced = manualScores?.[teamId]?.finishQForced || false;
+  const hasFinishCheckin = myCPs.some(c => c.cpId === "finish");
+  const showFinishQCard = hasFinishCheckin || finishForced;
+
   const scoreVal = teamData?.scores.total || 0;
   const scoreProgress = Math.min(100, scoreVal);
+
+  // Team readiness for Eye for Detail at CP2 (require ALL team members checked in before allowing game)
+  const teamId = cyclist?.teamId;
+  const teamSize = (participants || []).filter(p => p.teamId === teamId).length;
+  const checkedAtCp2 = checkins.filter(c => c.teamId === teamId && c.cpId === "cp2").length;
+  const eyeForced = manualScores?.[teamId]?.eyeForDetailForced || false;
+  const allTeamAtCp2 = (teamSize > 0 && checkedAtCp2 >= teamSize) || eyeForced;
 
   const quickCPs = CHECKPOINTS.slice(1); // exclude START from manual list
 
@@ -1783,8 +1834,32 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
         </div>
       </button>
 
+      {/* Eye for Detail status for people who reached CP2 (gated on full team check-in) */}
+      {myCPs.some(c => c.cpId === "cp2") && !myAnswers.some(a => a.game === "eye_for_detail") && (
+        <div style={{...CARD, background: allTeamAtCp2 ? "#0a2a1a" : "#2a1a0a", borderColor: allTeamAtCp2 ? "#00ff88" : "#ffbb00", marginBottom:12}}>
+          <div style={{fontSize:13, color: allTeamAtCp2 ? "#00ff88" : "#ffbb00", marginBottom:6}}>👁️ EYE FOR DETAIL (CP2 • 30 marks)</div>
+          {allTeamAtCp2 ? (
+            <div>
+              <div style={{fontSize:12, color:"#ccc", marginBottom:10}}>
+                All team members have checked in at CP2. One member should submit the answers for the team.
+              </div>
+              <button 
+                onClick={() => setView("eyeForDetail")}
+                style={{...BTN_PRIMARY, width:"100%", background:"#00ff88", color:"#000"}}
+              >
+                ATTEMPT EYE FOR DETAIL (30 MARKS)
+              </button>
+            </div>
+          ) : (
+            <div style={{fontSize:12, color:"#ccc"}}>
+              All your team mates haven't checked in at this CP yet. Once they do, you may attempt the Questionnaire from your Dashboard.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Finish Questionnaire status for people who reached Finish */}
-      {myCPs.some(c => c.cpId === "finish") && (
+      {showFinishQCard && (
         <div style={{...CARD, background:"#1a1408", borderColor:"#ffbb00", marginBottom:12}}>
           <div style={{fontSize:13, color:"#ffbb00", marginBottom:6}}>🏁 FINISH POINT QUESTIONNAIRE</div>
           
@@ -1850,6 +1925,22 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
         })}
       </div>
 
+      {onRefreshData && (
+        <button 
+          onClick={async () => {
+            try {
+              await onRefreshData();
+              showToast("Data refreshed (admin overrides applied)");
+            } catch(e) {
+              showToast("Refresh failed", "error");
+            }
+          }}
+          style={{...BTN_SEC, width:"100%", marginTop:4, fontSize:11}}
+        >
+          ↻ REFRESH DATA (for admin overrides / team updates)
+        </button>
+      )}
+
       <button onClick={()=>{setCyclist(null);setView("home");}} style={{...BTN_SEC,width:"100%",marginTop:4}}>LOG OUT</button>
       <BkBtn onClick={()=>setView("home")} />
     </div>
@@ -1859,11 +1950,17 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
 // ══════════════════════════════════════
 // CP CHECK-IN VIEW
 // ══════════════════════════════════════
-function CPCheckinView({ activeCP, cyclist, checkins, onCheckin, setView }) {
+function CPCheckinView({ activeCP, cyclist, checkins, onCheckin, setView, participants, manualScores }) {
   const cp = CHECKPOINTS.find(c=>c.id===activeCP);
   const already = checkins.find(c=>c.cyclistId===cyclist?.id&&c.cpId===activeCP);
   const [checking, setChecking] = useState(false);
   const [time] = useState(new Date().toLocaleTimeString());
+
+  // Team check-in gate for games (only relevant for cp2 Eye for Detail)
+  const teamSize = (participants || []).filter(p => p.teamId === cyclist?.teamId).length;
+  const checkedAtCp = checkins.filter(c => c.teamId === cyclist?.teamId && c.cpId === activeCP).length;
+  const eyeForced = manualScores?.[cyclist?.teamId]?.eyeForDetailForced || false;
+  const allTeamChecked = (teamSize > 0 && checkedAtCp >= teamSize) || (activeCP === 'cp2' && eyeForced);
 
   const go = async () => { 
     setChecking(true); 
@@ -1879,7 +1976,12 @@ function CPCheckinView({ activeCP, cyclist, checkins, onCheckin, setView }) {
           <div style={{fontSize:48,marginBottom:10}}>✅</div>
           <div style={{fontFamily:"monospace",fontSize:16,color:"#00ff88",fontWeight:"bold"}}>ALREADY CHECKED IN</div>
           <div style={{fontSize:12,color:"#555",marginTop:6}}>at {formatTime(already.timestamp)}</div>
-          {(activeCP==="cp2")&&<PBtn onClick={()=>setView("eyeForDetail")} icon="▶" label="START EYE FOR DETAIL (30 marks)" style={{marginTop:16}} />}
+          {(activeCP==="cp2") && allTeamChecked && <PBtn onClick={()=>setView("eyeForDetail")} icon="▶" label="START EYE FOR DETAIL (30 marks)" style={{marginTop:16}} />}
+          {(activeCP==="cp2") && !allTeamChecked && (
+            <div style={{background:"#2a1a0a", border:"1px solid #ffbb00", borderRadius:8, padding:"10px 12px", marginTop:16, fontSize:12, color:"#ffbb00"}}>
+              All your team mates haven't checked in at this CP yet. Once they do, you may attempt the Questionnaire from your Dashboard.
+            </div>
+          )}
           {(activeCP==="finish")&&<PBtn onClick={()=>setView("dashboard")} icon="▶" label="BACK TO DASHBOARD" style={{marginTop:16}} />}
         </div>
       ) : (
@@ -2563,7 +2665,7 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
               </div>
 
               {TEAMS.map(team => {
-                const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0 };
+                const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0, eyeForDetailForced: false, finishQForced: false };
                 return (
                   <div key={team.id} style={{...CARD, marginBottom:12, borderColor:`${team.color}33`}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
@@ -2601,6 +2703,24 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
                         }}
                         style={{width:"100%",background:"#111",border:"1px solid #333",color:"#fff",padding:"6px",borderRadius:6,textAlign:"center"}} 
                       />
+                    </div>
+
+                    {/* Admin override for dropouts / delayed cyclists */}
+                    <div style={{marginTop:8, paddingTop:6, borderTop:"1px solid #222", fontSize:10, color:"#ffaa00"}}>
+                      <label style={{display:"block", marginBottom:2, cursor:"pointer"}}>
+                        <input 
+                          type="checkbox" 
+                          checked={m.eyeForDetailForced || false}
+                          onChange={e => setManualScores(p => ({...p, [team.id]: {...(p[team.id]||{}), eyeForDetailForced: e.target.checked }}))}
+                        /> Force Eye for Detail button visible (for dropouts/delays)
+                      </label>
+                      <label style={{display:"block", cursor:"pointer"}}>
+                        <input 
+                          type="checkbox" 
+                          checked={m.finishQForced || false}
+                          onChange={e => setManualScores(p => ({...p, [team.id]: {...(p[team.id]||{}), finishQForced: e.target.checked }}))}
+                        /> Force Finish Q card visible (even if no check-in at Finish)
+                      </label>
                     </div>
 
                     {manualScoresLastSaved[team.id] && (
@@ -2939,12 +3059,18 @@ function SuccessDialogue({ data, onDismiss }) {
 
         {/* Contextual primary actions (interactive part) */}
         {isCheckin && data.cpId === 'cp2' && (
-          <button
-            onClick={() => onDismiss('eyeForDetail')}
-            style={{ ...BTN_PRIMARY, width: '100%', marginBottom: 8, background: '#00ff88', color: '#000', justifyContent: 'center' }}
-          >
-            START EYE FOR DETAIL (30 MARKS)
-          </button>
+          data.canStartEye ? (
+            <button
+              onClick={() => onDismiss('eyeForDetail')}
+              style={{ ...BTN_PRIMARY, width: '100%', marginBottom: 8, background: '#00ff88', color: '#000', justifyContent: 'center' }}
+            >
+              START EYE FOR DETAIL (30 MARKS)
+            </button>
+          ) : (
+            <div style={{background:"#2a1a0a", border:"1px solid #ffbb00", borderRadius:8, padding:"10px 12px", marginBottom:8, fontSize:12, color:"#ffbb00", textAlign:"center"}}>
+              All your team mates haven't checked in at CP2 yet. Once they do, you may attempt the Questionnaire from your Dashboard.
+            </div>
+          )
         )}
         {isCheckin && data.cpId === 'finish' && (
           <button
