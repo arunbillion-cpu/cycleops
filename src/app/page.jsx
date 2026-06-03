@@ -460,10 +460,11 @@ export default function CycleOps() {
   // ============================================
   function normalizeParticipant(row) {
     if (!row) return row;
+    const { password, ...safeRow } = row; // explicitly strip any password/hash
     return {
-      ...row,
-      teamId: row.team_id ?? row.teamId,
-      registeredAt: row.registered_at ?? row.registeredAt,
+      ...safeRow,
+      teamId: safeRow.team_id ?? safeRow.teamId,
+      registeredAt: safeRow.registered_at ?? safeRow.registeredAt,
     };
   }
 
@@ -526,10 +527,10 @@ export default function CycleOps() {
     if (!SUPABASE_URL || !SUPABASE_KEY) return;
 
     try {
-      // 1. Load participants
+      // 1. Load participants (exclude password hash for security - never send hashes to client)
       const { data: participantsData, error: pErr } = await supabase
         .from("participants")
-        .select("*")
+        .select("id, name, age, phone, emergency, medical, team_id, registered_at")
         .order("registered_at", { ascending: true });
 
       if (!pErr && participantsData) {
@@ -896,9 +897,10 @@ export default function CycleOps() {
     const tempIdx = sorted.findIndex((p, i) => i === sorted.length - 1);
     const assignedTeam = teamIds[tempIdx % 4];
 
+    const { password: _dontStorePlain, ...safeReg } = regForm;
     const newP = {
       id,
-      ...regForm,
+      ...safeReg,
       age: parseInt(regForm.age),
       teamId: assignedTeam,
       registeredAt: new Date().toISOString(),
@@ -963,28 +965,38 @@ export default function CycleOps() {
       }
 
       setCyclist(data.user);
+
+      const displayName = data.user?.name || name;
+
+      // Consume pending QR action (from native camera or in-app URL scan)
+      // Wrapped defensively so a bad pendingAction or other transient error never breaks the login success path
+      try {
+        if (pendingAction?.type === "checkin" && pendingAction.cpId) {
+          const cp = CHECKPOINTS.find(c => c.id === pendingAction.cpId);
+          if (cp) {
+            setActiveCP(cp.id);
+            setView("cpCheckin");
+            showToast(`Welcome back, ${displayName}! Opening ${cp.name} check-in...`);
+          } else {
+            setView("dashboard");
+            showToast(`Welcome back, ${displayName}!`);
+          }
+          setPendingAction(null);
+        } else {
+          setView("dashboard");
+          showToast(`Welcome back, ${displayName}!`);
+          setPendingAction(null);
+        }
+      } catch (navErr) {
+        console.warn("Post-login navigation had a transient issue (non-fatal):", navErr);
+        // At minimum ensure we land on dashboard
+        try { setView("dashboard"); } catch {}
+      }
     } catch (err) {
       console.error("Login error:", err);
       showToast("Login failed. Please try again.", "error");
+      // Do not navigate or consume pending on failure
     }
-
-    // Consume pending QR action (from native camera or in-app URL scan)
-    if (pendingAction?.type === "checkin" && pendingAction.cpId) {
-      const cp = CHECKPOINTS.find(c => c.id === pendingAction.cpId);
-      if (cp) {
-        setActiveCP(cp.id);
-        setView("cpCheckin");
-        showToast(`Welcome back, ${found.name}! Opening ${cp.name} check-in...`);
-      } else {
-        setView("dashboard");
-        showToast(`Welcome back, ${found.name}!`);
-      }
-    } else {
-      setView("dashboard");
-      showToast(`Welcome back, ${found.name}!`);
-    }
-
-    setPendingAction(null);
   };
 
   // ── Game answer submission ──

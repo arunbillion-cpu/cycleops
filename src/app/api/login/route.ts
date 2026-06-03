@@ -32,9 +32,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Find user using service role (server only)
+    // Explicit columns: never rely on *, and include password only for the server-side compare
     const { data: users, error } = await supabaseAdmin
       .from('participants')
-      .select('*')
+      .select('id, name, age, phone, emergency, medical, team_id, registered_at, password')
       .ilike('name', fullName)
       .limit(1);
 
@@ -43,6 +44,12 @@ export async function POST(request: NextRequest) {
     }
 
     const user = users[0];
+
+    // Safe diagnostic log (server only, never logs plain pw or full hash)
+    const pw = user.password || '';
+    const hashLen = pw.length;
+    const looksBcrypt = /^\$2[abxy]\$/.test(pw);
+    console.log(`[login] name=${fullName} hashLen=${hashLen} looksBcrypt=${looksBcrypt}`);
 
     // Verify password on server
     const passwordMatch = await bcrypt.compare(password, user.password);
