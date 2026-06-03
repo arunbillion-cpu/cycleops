@@ -251,21 +251,21 @@ const EYE_FOR_DETAIL_QUESTIONS = [
 // SCORING CONFIG (editable by admin)
 // ══════════════════════════════════════
 const DEFAULT_SCORING = {
-  arrival: {
-    label: "Arrival Timings (Legacy Bonus)",
-    total: 15,
-    perCP: { first:5, second:4, third:3, fourth:2 },
-    finish: { first:8, second:6, third:4, fourth:2 },
-    note: "Optional bonus points based on check-in order (not core to new plan)"
-  }
-  // Legacy game data removed during cleanup.
-  // Current core scoring: Eye for Detail 30 + Jerrican 40 (first correct) + Rapid Fire 15 + Finish Q 5
+  // Legacy arrival bonuses removed per event rules (no bonuses for timings; race standings are separate by elapsed time).
+  // Current core scoring: Eye for Detail 30 + Jerrican 40 (first correct team) + Rapid Fire 15 (manual) + Finish Q 5 (manual)
 };
 
 // Pure top-level leaderboard computation (extracted from giant component to give minifier
 // a separate, smaller function scope). This reduces risk of TDZ for mangled single-letter
 // vars like 'T' (from 't' in .map((t,i) or 'total' etc) during aggressive prod minification
 // of the huge CycleOps component.
+function formatElapsed(secs) {
+  if (secs == null || isNaN(secs)) return '--:--';
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], game2Status = {}, manualScores = {}, scoring = {}) {
   try {
     return TEAMS.map(team => {
@@ -273,20 +273,7 @@ function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], 
       const teamCheckins = checkins.filter(c=>c.teamId===team.id);
       const teamAnswers = gameAnswers.filter(a=>a.teamId===team.id);
 
-      // Arrival scores
-      let arrivalScore = 0;
-      CHECKPOINTS.slice(1).forEach(cp => {
-        const cpCheckins = checkins.filter(c=>c.cpId===cp.id);
-        const sorted = [...cpCheckins].sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
-        const rank = sorted.findIndex(c=>c.teamId===team.id);
-        if (rank>=0) {
-          if (cp.id==="finish") {
-            arrivalScore += [scoring.arrival.finish.first,scoring.arrival.finish.second,scoring.arrival.finish.third,scoring.arrival.finish.fourth][rank]||0;
-          } else {
-            arrivalScore += [scoring.arrival.perCP.first,scoring.arrival.perCP.second,scoring.arrival.perCP.third,scoring.arrival.perCP.fourth][rank]||0;
-          }
-        }
-      });
+      // Arrival / race time bonuses removed (no points from order or elapsed; separate race standings component by effective time)
 
       // Eye for Detail (30 marks max)
       const eyeAnswers = teamAnswers.filter(a => a.game === "eye_for_detail");
@@ -322,9 +309,10 @@ function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], 
       const m = manualScores[team.id] || { rapidFire: 0, finishQ: 0, eyeForDetailForced: false, finishQForced: false };
       const manualScore = (m.rapidFire || 0) + (m.finishQ || 0);
 
-      const total = arrivalScore + eyeForDetailScore + jerricanScore + manualScore;
+      const total = eyeForDetailScore + jerricanScore + manualScore;
 
       // Team finish elapsed (max of members' effective race time at finish, accounting for SP start + CP2 pause)
+      // Used for separate Race Standings (lower = better)
       const finishCheckins = checkins.filter(c => c.teamId === team.id && c.cpId === 'finish');
       let teamFinishElapsed = null;
       if (finishCheckins.length > 0) {
@@ -348,7 +336,6 @@ function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], 
       return {
         ...team, members, checkins:teamCheckins,
         scores:{ 
-          arrival: arrivalScore, 
           eyeForDetail: eyeForDetailScore,
           jerrican: jerricanScore,
           manual: manualScore,
@@ -364,7 +351,7 @@ function computeLeaderboard(participants = [], checkins = [], gameAnswers = [], 
       ...team,
       members: [],
       checkins: [],
-      scores: { arrival: 0, eyeForDetail: 0, jerrican: 0, manual: 0, total: 0, finishElapsed: null },
+      scores: { eyeForDetail: 0, jerrican: 0, manual: 0, total: 0, finishElapsed: null },
       rank: i + 1,
     }));
   }
@@ -462,6 +449,13 @@ export default function CycleOps() {
 
   // Interactive success dialogues for check-ins and game/task completions (user request)
   const [successDialogue, setSuccessDialogue] = useState(null);
+
+  // Live clock for current elapsed displays (updates every second when teams are active)
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
 
 
@@ -571,6 +565,7 @@ export default function CycleOps() {
 
   // Team start from SP (distorted starts controlled by admin)
   const startTeamFromSP = async (teamId) => {
+    if (!confirm(`Confirm START for team ${teamId.toUpperCase()} from SP now? This sets the zero time for their race clock.`)) return;
     const now = new Date().toISOString();
     setGame2Status(prev => {
       const curr = prev[teamId] || {};
@@ -583,6 +578,7 @@ export default function CycleOps() {
 
   // Resume team after CP2 questionnaire (admin manual control per team)
   const resumeTeamAfterCP2 = async (teamId) => {
+    if (!confirm(`Confirm RESUME for team ${teamId.toUpperCase()} after CP2 questionnaire? Their race clock will restart now.`)) return;
     const now = new Date().toISOString();
     setGame2Status(prev => {
       const curr = prev[teamId] || {};
@@ -612,15 +608,12 @@ export default function CycleOps() {
     return Math.max(0, Math.floor((checkMs - startMs - pauseMs) / 1000));
   }
 
-  function formatElapsed(secs) {
-    if (secs == null || isNaN(secs)) return '--:--';
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  }
+  // formatElapsed moved to top-level for use in module-level components like RaceStandingsView
 
   // Dropout: admin removes rider from all calcs, timings, team sizes, leaderboards
   const markDropped = async (cyclistId, drop = true) => {
+    const rider = participants.find(p => p.id === cyclistId);
+    if (!confirm(`${drop ? 'DROP OUT' : 'RESTORE'} rider ${rider?.name || cyclistId}? This will ${drop ? 'remove' : 're-include'} them from all timings, team sizes, and standings calculations.`)) return;
     setParticipants(prev => prev.map(p => p.id === cyclistId ? { ...p, dropped: drop } : p));
     // clean local checkins and answers for this rider
     setCheckins(prev => prev.filter(c => c.cyclistId !== cyclistId));
@@ -1230,6 +1223,7 @@ export default function CycleOps() {
           {cyclist && <div style={{background:"#111",border:"1px solid #222",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#00ff88",fontFamily:"monospace",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cyclist.name.split(" ")[0]}</div>}
           <NBtn onClick={()=>setShowScanner(true)} icon="📷" />
           <NBtn onClick={()=>setView("leaderboard")} icon="🏆" />
+          <NBtn onClick={()=>setView("raceStandings")} icon="⏱️" />
           <NBtn onClick={()=>setView(adminAuth?"admin":"adminAuth")} icon="⚙️" />
         </div>
       </nav>
@@ -1247,10 +1241,11 @@ export default function CycleOps() {
           pendingAction={pendingAction}
           setPendingAction={setPendingAction}
         />}
-        {view==="dashboard"  && <DashboardView cyclist={cyclist} setCyclist={setCyclist} lb={lb} checkins={checkins} gameAnswers={gameAnswers} setView={setView} setShowScanner={setShowScanner} activeCP={activeCP} setActiveCP={setActiveCP} showToast={showToast} participants={participants} manualScores={manualScores} onRefreshData={loadEventDataFromDB} />}
+        {view==="dashboard"  && <DashboardView cyclist={cyclist} setCyclist={setCyclist} lb={lb} checkins={checkins} gameAnswers={gameAnswers} setView={setView} setShowScanner={setShowScanner} activeCP={activeCP} setActiveCP={setActiveCP} showToast={showToast} participants={participants} manualScores={manualScores} onRefreshData={loadEventDataFromDB} currentTime={currentTime} game2Status={game2Status} />}
         {view==="cpCheckin"  && <CPCheckinView activeCP={activeCP} cyclist={cyclist} checkins={checkins} onCheckin={handleCPCheckin} setView={setView} participants={participants} manualScores={manualScores} />}
         {view==="eyeForDetail" && <EyeForDetailView cyclist={cyclist} gameAnswers={gameAnswers} setGameAnswers={setGameAnswers} setView={setView} showToast={showToast} participants={participants} checkins={checkins} manualScores={manualScores} />}
         {view==="leaderboard"&& <LeaderboardView lb={lb} scoring={scoring} setView={setView} />}
+        {view==="raceStandings"&& <RaceStandingsView game2Status={game2Status} checkins={checkins} participants={participants} setView={setView} />}
         {view==="adminAuth"  && <AdminAuthView adminPin={adminPin} setAdminPin={setAdminPin} onAuth={()=>{if(adminPin===ADMIN_PIN){setAdminAuth(true);setView("admin");showToast("Admin access granted");}else showToast("Wrong PIN","error");}} setView={setView} />}
         {view==="admin"      && adminAuth && <AdminView 
           participants={participants} lb={lb} checkins={checkins} gameAnswers={gameAnswers} 
@@ -1270,6 +1265,9 @@ export default function CycleOps() {
           markDropped={markDropped}
           startTeamFromSP={startTeamFromSP}
           resumeTeamAfterCP2={resumeTeamAfterCP2}
+          getElapsedSeconds={getElapsedSeconds}
+          formatElapsed={formatElapsed}
+          currentTime={currentTime}
         />}
         {view==="qrcodes"    && adminAuth && <QRCodesView setView={setView} />}
         {view==="scoringGuide" && <ScoringGuideView setView={setView} />}
@@ -1900,7 +1898,7 @@ function HydrationStopView({ activeCP, setView }) {
 // ══════════════════════════════════════
 // CYCLIST DASHBOARD
 // ══════════════════════════════════════
-function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView, setShowScanner, activeCP, setActiveCP, showToast, participants, manualScores, onRefreshData }) {
+function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView, setShowScanner, activeCP, setActiveCP, showToast, participants, manualScores, onRefreshData, currentTime, game2Status }) {
   if (!cyclist) { setView("home"); return null; }
   const teamId = cyclist?.teamId;
   const team = TEAMS.find(tm=>tm.id===teamId);
@@ -1951,6 +1949,34 @@ function DashboardView({ cyclist, setCyclist, lb, checkins, gameAnswers, setView
           </div>
         </div>
       </div>
+
+      {/* Live team elapsed (if started) */}
+      {(() => {
+        const t = game2Status[cyclist.teamId] || {};
+        if (!t.spStartTime) return null;
+        const startMs = new Date(t.spStartTime).getTime();
+        let liveElapsed = 0;
+        const now = currentTime || Date.now();
+        let pause = 0;
+        if (t.cp2CheckinTime && t.cp2ResumeTime) {
+          const ps = new Date(t.cp2CheckinTime).getTime();
+          const pe = new Date(t.cp2ResumeTime).getTime();
+          if (now > pe) pause = pe - ps;
+          else if (now > ps) pause = now - ps;
+        } else if (t.cp2CheckinTime && !t.cp2ResumeTime) {
+          const ps = new Date(t.cp2CheckinTime).getTime();
+          pause = now - ps;
+        }
+        liveElapsed = Math.floor((now - startMs - pause) / 1000);
+        if (liveElapsed < 0) liveElapsed = 0;
+        const isPaused = t.cp2CheckinTime && !t.cp2ResumeTime;
+        return (
+          <div style={{...CARD, marginBottom:12, textAlign:'center', background: isPaused ? '#2a1a0a' : '#0a1f0a'}}>
+            <div style={{fontSize:11, color: isPaused ? '#ffbb00' : '#00ff88'}}>TEAM LIVE ELAPSED {isPaused ? '(PAUSED at CP2)' : ''}</div>
+            <div style={{fontFamily:'monospace', fontSize:24, color:'#fff'}}>{formatElapsed(liveElapsed)}</div>
+          </div>
+        );
+      })()}
 
       {/* ACTIVITY RINGS — visual milestones for CPs and games (like fitness watch rings) */}
       <div style={{...CARD, marginBottom: 14, background: "#0a0c0a"}}>
@@ -2208,7 +2234,11 @@ function LeaderboardView({ lb, scoring, setView }) {
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,borderTop:"1px solid #111",paddingTop:12}}>
-            {[["ARRIVAL",team.scores.arrival],["EYE FOR DETAIL",team.scores.eyeForDetail || 0],["JERRICAN",team.scores.game2],["FINISH Q (manual)",team.scores.game5]].map(([label,val])=>(
+            {[
+              ["EYE FOR DETAIL",team.scores.eyeForDetail || 0],
+              ["JERRICAN",team.scores.jerrican || team.scores.game2 || 0],
+              ["FINISH Q (manual)",team.scores.finishQ || team.scores.game5 || 0]
+            ].map(([label,val])=>(
               <div key={label} style={{textAlign:"center"}}>
                 <div style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:"#aaa"}}>{val}</div>
                 <div style={{fontSize:9,color:"#444",fontFamily:"monospace"}}>{label}</div>
@@ -2229,6 +2259,67 @@ function LeaderboardView({ lb, scoring, setView }) {
 }
 
 // ══════════════════════════════════════
+// RACE STANDINGS (separate from points; ranked by effective finish elapsed time)
+// ══════════════════════════════════════
+function RaceStandingsView({ game2Status, checkins, participants, setView }) {
+  // Compute per team finish elapsed (max of non-dropped members)
+  const raceTeams = TEAMS.map(team => {
+    const teamMembers = (participants || []).filter(p => p.teamId === team.id && !p.dropped);
+    const finishCheckins = checkins.filter(c => c.teamId === team.id && c.cpId === 'finish' && teamMembers.some(m => m.id === c.cyclistId));
+    let finishElapsed = null;
+    if (finishCheckins.length > 0) {
+      const tt = game2Status[team.id] || {};
+      const elapseds = finishCheckins.map(c => {
+        if (!tt.spStartTime) return Infinity;
+        const startMs = new Date(tt.spStartTime).getTime();
+        const checkMs = new Date(c.timestamp).getTime();
+        let pause = 0;
+        if (tt.cp2CheckinTime && tt.cp2ResumeTime) {
+          const ps = new Date(tt.cp2CheckinTime).getTime();
+          const pe = new Date(tt.cp2ResumeTime).getTime();
+          if (checkMs > pe) pause = pe - ps;
+          else if (checkMs > ps) pause = checkMs - ps;
+        }
+        return Math.max(0, Math.floor((checkMs - startMs - pause) / 1000));
+      });
+      finishElapsed = Math.max(...elapseds);
+    }
+    return {
+      ...team,
+      finishElapsed,
+      numFinishers: finishCheckins.length,
+      teamSize: teamMembers.length
+    };
+  }).filter(t => t.teamSize > 0)
+    .sort((a,b) => (a.finishElapsed ?? Infinity) - (b.finishElapsed ?? Infinity));
+
+  return (
+    <div className="fadeUp" style={{padding:"0 16px"}}>
+      <PageHeader icon="⏱️" title="RACE STANDINGS" sub="Ranked by effective finish elapsed (lower = better; CP2 pause excluded)" />
+      {raceTeams.length === 0 && <div style={{textAlign:"center",padding:40,color:"#444",fontFamily:"monospace",fontSize:13}}>No teams have finished yet</div>}
+      {raceTeams.map((team, i) => (
+        <div key={team.id} style={{...CARD, marginBottom:12, borderColor: `${team.color}33`}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <span style={{fontSize:28}}>{team.emoji}</span>
+            <div style={{flex:1}}>
+              <div style={{fontFamily:"monospace",fontSize:18,fontWeight:"bold",color:team.color}}>{team.name}</div>
+              <div style={{fontSize:11,color:"#555"}}>{team.numFinishers}/{team.teamSize} finished</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontFamily:"monospace",fontSize:24,fontWeight:"bold",color:"#00ff88"}}>
+                {team.finishElapsed != null ? formatElapsed(team.finishElapsed) : '—'}
+              </div>
+              <div style={{fontSize:10,color:"#555"}}>#{i+1}</div>
+            </div>
+          </div>
+        </div>
+      ))}
+      <BkBtn onClick={()=>setView("home")} />
+    </div>
+  );
+}
+
+// ══════════════════════════════════════
 // SCORING GUIDE VIEW
 // ══════════════════════════════════════
 function ScoringGuideView({ setView }) {
@@ -2237,7 +2328,7 @@ function ScoringGuideView({ setView }) {
       <PageHeader icon="📊" title="SCORING GUIDE" sub="How points are awarded" />
 
       <div style={{...CARD, marginBottom:12}}>
-        <div style={{fontSize:13, color:"#888", marginBottom:12}}>Total possible: 90 points</div>
+        <div style={{fontSize:13, color:"#888", marginBottom:12}}>Total possible: 90 points (arrival/time bonuses removed; see Race Control tab for separate elapsed-time standings)</div>
 
         <div style={{padding:"12px 0", borderBottom:"1px solid #222"}}>
           <div style={{display:"flex", justifyContent:"space-between"}}>
@@ -2269,7 +2360,7 @@ function ScoringGuideView({ setView }) {
       </div>
 
       <div style={{...CARD, background:"#111"}}>
-        <div style={{fontSize:12, color:"#888"}}>Note: Arrival timing bonuses are legacy/optional.</div>
+        <div style={{fontSize:12, color:"#888"}}>Note: Arrival timing bonuses removed; see Race Control tab for elapsed standings.</div>
       </div>
 
       <BkBtn onClick={() => setView("home")} />
@@ -2555,7 +2646,7 @@ function AdminAuthView({ adminPin, setAdminPin, onAuth, setView }) {
 // ══════════════════════════════════════
 // ADMIN DASHBOARD
 // ══════════════════════════════════════
-function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, manualScores, setManualScores, scoring, setScoring, setView, showToast, onRefreshData, onAdminLogout, lastDbSync, setLastDbSync, manualScoresSaving, manualScoresLastSaved, jerricanFinishOrder, setJerricanFinishOrder, saveJerricanToDB, markDropped, startTeamFromSP, resumeTeamAfterCP2 }) {
+function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGame2Status, manualScores, setManualScores, scoring, setScoring, setView, showToast, onRefreshData, onAdminLogout, lastDbSync, setLastDbSync, manualScoresSaving, manualScoresLastSaved, jerricanFinishOrder, setJerricanFinishOrder, saveJerricanToDB, markDropped, startTeamFromSP, resumeTeamAfterCP2, getElapsedSeconds, formatElapsed, currentTime }) {
   const [tab, setTab] = useState("overview");
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -2584,7 +2675,7 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
 
   // Export CSV
   const exportCSV = () => {
-    const rows=[["Rank","Team","Total","Arrival","Game1","Game2","Game3","Game4","Game5","Members"],...lb.map(entry=>[entry.rank,entry.name,entry.scores.total,entry.scores.arrival,entry.scores.game1,entry.scores.game2,entry.scores.game3,entry.scores.game4,entry.scores.game5,entry.members.length])];
+    const rows=[["Rank","Team","Total","Eye for Detail","Jerrican","Finish Q (manual)","Members"],...lb.map(entry=>[entry.rank,entry.name,entry.scores.total,entry.scores.eyeForDetail || 0,entry.scores.jerrican || entry.scores.game2 || 0,entry.scores.finishQ || entry.scores.game5 || 0,entry.members.length])];
     const blob=new Blob([rows.map(r=>r.join(",")).join("\n")],{type:"text/csv"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="cycleops_results.csv";a.click();
     showToast("Exported!");
@@ -2643,7 +2734,7 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
 
       {/* Tab bar */}
       <div style={{display:"flex",borderBottom:"1px solid #111",background:"rgba(6,6,6,0.97)",position:"sticky",top:54,zIndex:50,backdropFilter:"blur(8px)"}}>
-        {[["overview","📊","OVERVIEW"],["jerrican","⛽","JERRICAN"],["riders","👤","RIDERS"],["manual","✍️","MANUAL SCORES"],["settings","⚙️","SETTINGS"]].map(([id,icon,label])=>(
+        {[["overview","📊","OVERVIEW"],["jerrican","⛽","JERRICAN"],["race","⏱️","RACE CONTROL"],["riders","👤","RIDERS"],["manual","✍️","MANUAL SCORES"],["settings","⚙️","SETTINGS"]].map(([id,icon,label])=>(
           <button key={id} onClick={()=>setTab(id)}
             style={{flex:1,padding:"10px 2px",background:"none",border:"none",borderBottom:`3px solid ${tab===id?"#00ff88":"transparent"}`,cursor:"pointer",color:tab===id?"#00ff88":"#555",transition:"all 0.2s"}}>
             <div style={{fontSize:16}}>{icon}</div>
@@ -2753,22 +2844,127 @@ function AdminView({ participants, lb, checkins, gameAnswers, game2Status, setGa
                     )}
                   </div>
 
-                  {/* SP START and CP2 RESUME for overall race timings (distorted starts + pause at questionnaire not counted in race time) */}
-                  <div style={{marginTop:8, paddingTop:8, borderTop:'1px solid #222', fontSize:10, color:'#888'}}>
-                    <div style={{color:team.color, marginBottom:2, fontSize:11}}>RACE START / CP2 PAUSE</div>
-                    <div>SP Start: {j.spStartTime ? new Date(j.spStartTime).toLocaleTimeString() : '—'}</div>
-                    {!j.spStartTime && (
-                      <button onClick={() => startTeamFromSP(team.id)} style={{background:'#002200', color:'#00ff88', fontSize:9, padding:'1px 4px', border:'1px solid #00ff88', marginTop:1, cursor:'pointer'}}>START TEAM FROM SP</button>
-                    )}
-                    <div style={{marginTop:2}}>CP2 Checkin: {j.cp2CheckinTime ? new Date(j.cp2CheckinTime).toLocaleTimeString() : '—'}</div>
-                    <div>CP2 Resume: {j.cp2ResumeTime ? new Date(j.cp2ResumeTime).toLocaleTimeString() : '—'}</div>
-                    {checkins.some(c=>c.teamId===team.id && c.cpId==='cp2') && !j.cp2ResumeTime && j.spStartTime && (
-                      <button onClick={() => resumeTeamAfterCP2(team.id)} style={{background:'#220000', color:'#ffaa00', fontSize:9, padding:'1px 4px', border:'1px solid #ffaa00', marginTop:1, cursor:'pointer'}}>RESUME TEAM (after Q)</button>
-                    )}
-                  </div>
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* RACE CONTROL TAB: dedicated for SP starts, CP2 pauses/resumes, individual/team timings, live status */}
+        {tab==="race"&&(
+          <div>
+            <div style={{...CARD,marginBottom:16,background:"rgba(0,200,255,0.04)",borderColor:"rgba(0,200,255,0.2)"}}>
+              <div style={{fontFamily:"monospace",fontSize:13,color:"#00ccff",marginBottom:6}}>⏱️ RACE CONTROL • STAGGERED STARTS + CP2 PAUSES</div>
+              <div style={{fontSize:12,color:"#888",lineHeight:1.5}}>
+                Admin controls team starts from SP (staggered to avoid crowding).<br />
+                At CP2: check-in pauses the team timer. Questionnaire time (1 min/question) not counted.<br />
+                Admin must manually RESUME each team after questionnaire to restart their stopwatch.<br />
+                Effective elapsed = check-in time − SP start − pause duration. Team time = last rider's effective elapsed.
+              </div>
+            </div>
+
+            {/* Per-team race controls */}
+            {TEAMS.map(team => {
+              const j = game2Status[team.id] || {};
+              const teamHasCp2 = checkins.some(c => c.teamId === team.id && c.cpId === 'cp2' && !participants.find(p=>p.id===c.cyclistId)?.dropped);
+
+              return (
+                <div key={team.id} style={{...CARD, marginBottom:12, borderColor: `${team.color}33`}}>
+                  <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:8}}>
+                    <span style={{fontSize:22}}>{team.emoji}</span>
+                    <span style={{fontFamily:"monospace", fontSize:15, fontWeight:"bold", color:team.color, flex:1}}>{team.name}</span>
+                  </div>
+
+                  <div style={{fontSize:11, color:'#888', marginBottom:6}}>
+                    SP Start: {j.spStartTime ? new Date(j.spStartTime).toLocaleTimeString() : '— not started'}
+                  </div>
+                  {!j.spStartTime && (
+                    <button onClick={() => startTeamFromSP(team.id)} style={{background:'#002200', color:'#00ff88', fontSize:11, padding:'6px 12px', border:'1px solid #00ff88', borderRadius:6, marginBottom:8, cursor:'pointer'}}>
+                      START TEAM FROM SP (GO)
+                    </button>
+                  )}
+
+                  <div style={{fontSize:11, color:'#888', marginBottom:4}}>
+                    CP2 Check-in (pause start): {j.cp2CheckinTime ? new Date(j.cp2CheckinTime).toLocaleTimeString() : '—'}
+                  </div>
+                  <div style={{fontSize:11, color:'#888', marginBottom:6}}>
+                    CP2 Resume (restart stopwatch): {j.cp2ResumeTime ? new Date(j.cp2ResumeTime).toLocaleTimeString() : '—'}
+                  </div>
+                  {teamHasCp2 && !j.cp2ResumeTime && j.spStartTime && (
+                    <button onClick={() => resumeTeamAfterCP2(team.id)} style={{background:'#220000', color:'#ffaa00', fontSize:11, padding:'6px 12px', border:'1px solid #ffaa00', borderRadius:6, cursor:'pointer'}}>
+                      RESUME TEAM AFTER QUESTIONNAIRE
+                    </button>
+                  )}
+
+                  {/* Quick status */}
+                  <div style={{fontSize:10, marginTop:6, color: j.cp2ResumeTime ? '#00ff88' : j.cp2CheckinTime ? '#ffbb00' : '#888'}}>
+                    Status: {!j.spStartTime ? 'NOT STARTED' : j.cp2ResumeTime ? 'RUNNING (post CP2)' : j.cp2CheckinTime ? 'PAUSED AT CP2' : 'STARTED (pre CP2)'}
+                  </div>
+                  {j.spStartTime && currentTime && (
+                    <div style={{fontSize:10, color:'#00ccff', marginTop:4}}>
+                      Live: {(() => {
+                        const startMs = new Date(j.spStartTime).getTime();
+                        let pause = 0;
+                        const now = currentTime;
+                        if (j.cp2CheckinTime && j.cp2ResumeTime) {
+                          const ps = new Date(j.cp2CheckinTime).getTime();
+                          const pe = new Date(j.cp2ResumeTime).getTime();
+                          if (now > pe) pause = pe - ps; else if (now > ps) pause = now - ps;
+                        } else if (j.cp2CheckinTime && !j.cp2ResumeTime) {
+                          pause = now - new Date(j.cp2CheckinTime).getTime();
+                        }
+                        const live = Math.max(0, Math.floor((now - startMs - pause)/1000));
+                        return formatElapsed(live);
+                      })()}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Rich timings table: individual + derived team */}
+            <p style={{fontFamily:"monospace",fontSize:12,color:"#00ccff",marginBottom:8}}>INDIVIDUAL & TEAM TIMINGS (effective elapsed, CP2 pause excluded)</p>
+            <div style={{...CARD, padding:0, overflowX:'auto'}}>
+              <table style={{width:'100%', borderCollapse:'collapse', fontSize:11, fontFamily:'monospace'}}>
+                <thead>
+                  <tr style={{background:'#111'}}>
+                    <th style={{padding:6,textAlign:'left',borderBottom:'1px solid #222'}}>Rider</th>
+                    <th style={{padding:6,textAlign:'left',borderBottom:'1px solid #222'}}>Team</th>
+                    <th style={{padding:6,textAlign:'right',borderBottom:'1px solid #222'}}>CP1</th>
+                    <th style={{padding:6,textAlign:'right',borderBottom:'1px solid #222'}}>CP2 (paused)</th>
+                    <th style={{padding:6,textAlign:'right',borderBottom:'1px solid #222'}}>CP3</th>
+                    <th style={{padding:6,textAlign:'right',borderBottom:'1px solid #222'}}>Finish</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {participants.filter(p=>!p.dropped).sort((a,b)=>a.teamId.localeCompare(b.teamId)||a.name.localeCompare(b.name)).map(p => {
+                    const team = TEAMS.find(t=>t.id===p.teamId);
+                    const pCheckins = checkins.filter(c=>c.cyclistId===p.id);
+                    const getTime = (cp) => {
+                      const c = pCheckins.find(x=>x.cpId===cp);
+                      if (!c) return '—';
+                      const el = getElapsedSeconds(c.timestamp, p.teamId, game2Status);
+                      return el != null ? formatElapsed(el) : '—';
+                    };
+                    return (
+                      <tr key={p.id} style={{borderBottom:'1px solid #1a1a1a'}}>
+                        <td style={{padding:6}}>{p.name}</td>
+                        <td style={{padding:6,color:team?.color}}>{team?.name}</td>
+                        <td style={{padding:6,textAlign:'right'}}>{getTime('cp1')}</td>
+                        <td style={{padding:6,textAlign:'right'}}>{getTime('cp2')}</td>
+                        <td style={{padding:6,textAlign:'right'}}>{getTime('cp3')}</td>
+                        <td style={{padding:6,textAlign:'right',fontWeight:'bold'}}>{getTime('finish')}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{fontSize:10,color:'#555',marginTop:8}}>
+              Team standings by race time (lower elapsed = better) are in the separate Race Standings view.
+            </div>
+            <button onClick={() => setView("raceStandings")} style={{...BTN_PRIMARY, width:"100%", marginTop:12}}>VIEW FULL RACE STANDINGS</button>
           </div>
         )}
 
